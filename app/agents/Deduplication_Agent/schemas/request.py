@@ -1,30 +1,6 @@
-# from __future__ import annotations
-
-# from pydantic import BaseModel, ConfigDict, Field
-
-
-# class DeduplicationRequest(BaseModel):
-#     model_config = ConfigDict(
-#         extra="forbid",
-#         populate_by_name=True,
-#     )
-
-#     CompanyId: str = Field(
-#         ...,
-#         min_length=1,
-#         description="Company identifier",
-#     )
-
-#     TenderId: str = Field(
-#         ...,
-#         min_length=1,
-#         description="Tender identifier",
-#     )
 
 from __future__ import annotations
-
 from pydantic import BaseModel, ConfigDict, Field
-
 
 class DeduplicationRequest(BaseModel):
     model_config = ConfigDict(
