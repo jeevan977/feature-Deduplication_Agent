@@ -805,7 +805,7 @@ class RequirementDeduplicationService:
                 {
                     "$set": {
                         "Output": result,
-                        "Status": "Completed",
+                        "Status": "IsRegenerated",
                         "Error": None,
                         "UpdatedAt": completed_at,
                         "CompletedAt": completed_at,

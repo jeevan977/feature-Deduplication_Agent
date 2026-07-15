@@ -666,7 +666,7 @@ class RequirementEvidenceSummaryAgent:
 
     Complete flow contained in this one file:
 
-    1. Read the latest completed Requirement
+    1. Read the latest successfully regenerated Requirement
        Deduplication result from MongoDB.
     2. Extract Output.DeduplicatedRequirements[].
     3. Search company-specific evidence chunks in Qdrant.
@@ -842,7 +842,7 @@ class RequirementEvidenceSummaryAgent:
 
         query["$and"].append(
             {
-                "Status": "Completed"
+                "Status": "IsRegenerated"
             }
         )
 
@@ -872,7 +872,7 @@ class RequirementEvidenceSummaryAgent:
 
         if source_document is None:
             raise ValueError(
-                "No completed deduplication document was found "
+                "No IsRegenerated deduplication document was found "
                 "for the supplied CompanyId and TenderId. "
                 f"CompanyId: {company_id}. "
                 f"TenderId: {tender_id}."
@@ -886,7 +886,7 @@ class RequirementEvidenceSummaryAgent:
 
         if not deduplicated_requirements:
             raise ValueError(
-                "The completed deduplication document does not "
+                "The IsRegenerated deduplication document does not "
                 "contain Output.DeduplicatedRequirements[]."
             )
 
@@ -1713,7 +1713,7 @@ class RequirementEvidenceSummaryAgent:
                 {
                     "$set": {
                         "Output": output,
-                        "Status": "Completed",
+                        "Status": "IsRegenerated",
                         "Error": None,
                         "UpdatedAt": completed_at,
                         "CompletedAt": completed_at,
@@ -1750,7 +1750,7 @@ class RequirementEvidenceSummaryAgent:
                 "EvidenceSummaryId": (
                     evidence_summary_id
                 ),
-                "Status": "Completed",
+                "Status": "IsRegenerated",
                 "Result": output,
             }
 

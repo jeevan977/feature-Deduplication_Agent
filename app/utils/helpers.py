@@ -540,18 +540,50 @@ def get_requirement_is_regenerated(
     return normalize_boolean(value)
 
 
+# def build_generation_fields(
+#     source_requirements: Any,
+# ) -> dict[str, Any]:
+#     """
+#     Create generation fields for a deduplicated
+#     requirement.
+
+#     For duplicate groups, the output is treated as
+#     regenerated when any source requirement is
+#     regenerated.
+#     """
+
+#     if not isinstance(
+#         source_requirements,
+#         Sequence,
+#     ) or isinstance(
+#         source_requirements,
+#         (str, bytes, bytearray),
+#     ):
+#         source_requirements = [
+#             source_requirements
+#         ]
+
+#     is_regenerated = any(
+#         get_requirement_is_regenerated(
+#             requirement
+#         )
+#         for requirement in source_requirements
+#         if requirement is not None
+#     )
+
+#     return {
+#         "IsGenerated": True,
+#         "IsRegenerated": is_regenerated,
+#         "Status": (
+#             "IsRegenerating"
+#             if is_regenerated
+#             else "Active"
+#         ),
+#     }
+
 def build_generation_fields(
     source_requirements: Any,
 ) -> dict[str, Any]:
-    """
-    Create generation fields for a deduplicated
-    requirement.
-
-    For duplicate groups, the output is treated as
-    regenerated when any source requirement is
-    regenerated.
-    """
-
     if not isinstance(
         source_requirements,
         Sequence,
