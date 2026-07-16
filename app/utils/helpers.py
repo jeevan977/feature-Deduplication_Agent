@@ -5,8 +5,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import asdict, is_dataclass
-from typing import Any, Mapping, Sequence
-
+from typing import Any, Mapping, Sequence, Optional
 from app.agents.Deduplication_Agent.graph.agent_state import (
     DeduplicationState,
 )
@@ -850,6 +849,252 @@ def collect_requirement_intent_values(
         ),
     }
 
+
+def normalize_output_string_list(
+    value: Any,
+) -> list[str]:
+    """
+    Convert a value into a clean list of strings.
+
+    Empty values are removed and duplicate values are removed
+    case-insensitively while preserving the original order.
+    """
+
+    if value is None:
+        return []
+
+    if isinstance(value, str):
+        values: Sequence[Any] = [value]
+
+    elif (
+        isinstance(value, Sequence)
+        and not isinstance(
+            value,
+            (
+                str,
+                bytes,
+                bytearray,
+            ),
+        )
+    ):
+        values = value
+
+    else:
+        values = [value]
+
+    normalized_values: list[str] = []
+    seen_values: set[str] = set()
+
+    for item in values:
+        item_text = str(
+            item or ""
+        ).strip()
+
+        if not item_text:
+            continue
+
+        normalized_key = (
+            item_text.casefold()
+        )
+
+        if normalized_key in seen_values:
+            continue
+
+        seen_values.add(
+            normalized_key
+        )
+
+        normalized_values.append(
+            item_text
+        )
+
+    return normalized_values
+
+
+def collect_requirement_intent_values(
+    source_requirements: Sequence[Any],
+) -> dict[str, list[str]]:
+    """
+    Collect CapabilityIntent, EvidenceSections and SemanticAnchors
+    from all original requirements represented by one deduplicated
+    requirement.
+
+    The function supports both direct fields and fields stored inside
+    IntentResult. It also supports common nested MongoDB wrappers such
+    as Document, Requirement, Payload and Data.
+    """
+
+    capability_intents: list[str] = []
+    evidence_sections: list[str] = []
+    semantic_anchors: list[str] = []
+
+    def collect_from_mapping(
+        mapping: Mapping[str, Any],
+        depth: int = 0,
+    ) -> None:
+        """
+        Read intent values from one mapping and selected nested
+        mappings.
+        """
+
+        if depth > 4:
+            return
+
+        # --------------------------------------------------------
+        # Read fields stored directly on the requirement
+        # --------------------------------------------------------
+
+        capability_intents.extend(
+            normalize_output_string_list(
+                get_first_value(
+                    mapping,
+                    "CapabilityIntent",
+                    "capability_intent",
+                    "capabilityIntent",
+                    default=[],
+                )
+            )
+        )
+
+        evidence_sections.extend(
+            normalize_output_string_list(
+                get_first_value(
+                    mapping,
+                    "EvidenceSections",
+                    "evidence_sections",
+                    "evidenceSections",
+                    default=[],
+                )
+            )
+        )
+
+        semantic_anchors.extend(
+            normalize_output_string_list(
+                get_first_value(
+                    mapping,
+                    "SemanticAnchors",
+                    "semantic_anchors",
+                    "semanticAnchors",
+                    default=[],
+                )
+            )
+        )
+
+        # --------------------------------------------------------
+        # Read fields stored inside IntentResult
+        # --------------------------------------------------------
+
+        intent_result = get_first_value(
+            mapping,
+            "IntentResult",
+            "intentResult",
+            "intent_result",
+            default=None,
+        )
+
+        if isinstance(
+            intent_result,
+            Mapping,
+        ):
+            capability_intents.extend(
+                normalize_output_string_list(
+                    get_first_value(
+                        intent_result,
+                        "CapabilityIntent",
+                        "capability_intent",
+                        "capabilityIntent",
+                        default=[],
+                    )
+                )
+            )
+
+            evidence_sections.extend(
+                normalize_output_string_list(
+                    get_first_value(
+                        intent_result,
+                        "EvidenceSections",
+                        "evidence_sections",
+                        "evidenceSections",
+                        default=[],
+                    )
+                )
+            )
+
+            semantic_anchors.extend(
+                normalize_output_string_list(
+                    get_first_value(
+                        intent_result,
+                        "SemanticAnchors",
+                        "semantic_anchors",
+                        "semanticAnchors",
+                        default=[],
+                    )
+                )
+            )
+
+        # --------------------------------------------------------
+        # Support common nested source-document structures
+        # --------------------------------------------------------
+
+        nested_mapping_keys = (
+            "Document",
+            "document",
+            "Requirement",
+            "requirement",
+            "SourceRequirement",
+            "sourceRequirement",
+            "Payload",
+            "payload",
+            "Data",
+            "data",
+            "Metadata",
+            "metadata",
+            "Item",
+            "item",
+        )
+
+        for nested_key in nested_mapping_keys:
+            nested_value = mapping.get(
+                nested_key
+            )
+
+            if isinstance(
+                nested_value,
+                Mapping,
+            ):
+                collect_from_mapping(
+                    nested_value,
+                    depth + 1,
+                )
+
+    for source_requirement in source_requirements:
+        if not isinstance(
+            source_requirement,
+            Mapping,
+        ):
+            continue
+
+        collect_from_mapping(
+            source_requirement
+        )
+
+    return {
+        "CapabilityIntent": (
+            normalize_output_string_list(
+                capability_intents
+            )
+        ),
+        "EvidenceSections": (
+            normalize_output_string_list(
+                evidence_sections
+            )
+        ),
+        "SemanticAnchors": (
+            normalize_output_string_list(
+                semantic_anchors
+            )
+        ),
+    }
 
 def validate_deduplication_result(
     result: Any,
