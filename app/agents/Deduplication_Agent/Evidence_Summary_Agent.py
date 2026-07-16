@@ -732,6 +732,20 @@ class RequirementEvidenceSummaryAgent:
                 )
             )
 
+            print(
+                "Qdrant configuration:",
+                {
+                    "url": qdrant_url,
+                    "collection": (
+                        self.qdrant_collection_name
+                    ),
+                    "apiKeyPresent": bool(
+                        qdrant_api_key
+                    ),
+                    "timeoutSeconds": qdrant_timeout,
+                },
+            )
+
             self._qdrant_client = QdrantClient(
                 url=qdrant_url,
                 api_key=(
@@ -922,14 +936,101 @@ class RequirementEvidenceSummaryAgent:
             ]
         )
 
+    async def validate_qdrant_collection(
+        self,
+    ) -> None:
+        """
+        Validate the Qdrant connection and source collection once
+        before starting concurrent requirement processing.
+        """
+
+        def validate() -> None:
+            try:
+                collection_info = (
+                    self.qdrant_client.get_collection(
+                        collection_name=(
+                            self.qdrant_collection_name
+                        )
+                    )
+                )
+
+            except Exception as exc:
+                status_code = getattr(
+                    exc,
+                    "status_code",
+                    None,
+                )
+
+                raise RuntimeError(
+                    "Qdrant collection validation failed. "
+                    f"Collection: "
+                    f"{self.qdrant_collection_name}. "
+                    f"Status code: {status_code}. "
+                    f"Message: {exc}"
+                ) from exc
+
+            print(
+                "Qdrant collection validated:",
+                {
+                    "collection": (
+                        self.qdrant_collection_name
+                    ),
+                    "status": str(
+                        getattr(
+                            collection_info,
+                            "status",
+                            "available",
+                        )
+                    ),
+                },
+            )
+
+        await asyncio.to_thread(validate)
+
     async def create_query_embedding(
         self,
         search_query: str,
     ) -> list[float]:
-        return await asyncio.to_thread(
-            self.embeddings.embed_query,
-            search_query,
-        )
+        try:
+            embedding = await asyncio.to_thread(
+                self.embeddings.embed_query,
+                search_query,
+            )
+
+            print(
+                "Embedding generated successfully:",
+                {
+                    "dimension": len(
+                        embedding
+                    ),
+                    "queryLength": len(
+                        search_query
+                    ),
+                },
+            )
+
+            return embedding
+
+        except Exception as exc:
+            print(
+                "Embedding generation failed:",
+                {
+                    "errorType": type(exc).__name__,
+                    "statusCode": getattr(
+                        exc,
+                        "status_code",
+                        None,
+                    ),
+                    "errorCode": getattr(
+                        exc,
+                        "code",
+                        None,
+                    ),
+                    "message": str(exc),
+                },
+            )
+
+            raise
 
     async def search_qdrant(
         self,
@@ -953,40 +1054,13 @@ class RequirementEvidenceSummaryAgent:
         def execute_search() -> list[Any]:
             client = self.qdrant_client
 
-            if hasattr(client, "query_points"):
-                query_arguments: dict[str, Any] = {
-                    "collection_name": (
-                        self.qdrant_collection_name
-                    ),
-                    "query": query_vector,
-                    "query_filter": company_filter,
-                    "limit": self.top_k,
-                    "with_payload": True,
-                }
-
-                if self.score_threshold > 0:
-                    query_arguments[
-                        "score_threshold"
-                    ] = self.score_threshold
-
-                if vector_name:
-                    query_arguments["using"] = (
-                        vector_name
+            def execute_legacy_search() -> list[Any]:
+                if not hasattr(client, "search"):
+                    raise TypeError(
+                        "The installed qdrant-client does not "
+                        "provide search()."
                     )
 
-                query_response = client.query_points(
-                    **query_arguments
-                )
-
-                points = getattr(
-                    query_response,
-                    "points",
-                    query_response,
-                )
-
-                return list(points or [])
-
-            if hasattr(client, "search"):
                 search_arguments: dict[str, Any] = {
                     "collection_name": (
                         self.qdrant_collection_name
@@ -1017,14 +1091,119 @@ class RequirementEvidenceSummaryAgent:
                     or []
                 )
 
+            if hasattr(client, "query_points"):
+                query_arguments: dict[str, Any] = {
+                    "collection_name": (
+                        self.qdrant_collection_name
+                    ),
+                    "query": query_vector,
+                    "query_filter": company_filter,
+                    "limit": self.top_k,
+                    "with_payload": True,
+                }
+
+                if self.score_threshold > 0:
+                    query_arguments[
+                        "score_threshold"
+                    ] = self.score_threshold
+
+                if vector_name:
+                    query_arguments["using"] = (
+                        vector_name
+                    )
+
+                try:
+                    query_response = (
+                        client.query_points(
+                            **query_arguments
+                        )
+                    )
+
+                    points = getattr(
+                        query_response,
+                        "points",
+                        query_response,
+                    )
+
+                    return list(points or [])
+
+                except Exception as query_exc:
+                    query_status_code = getattr(
+                        query_exc,
+                        "status_code",
+                        None,
+                    )
+
+                    if (
+                        query_status_code == 404
+                        and hasattr(client, "search")
+                    ):
+                        print(
+                            "Qdrant query_points endpoint "
+                            "returned 404. Falling back "
+                            "to search()."
+                        )
+
+                        return execute_legacy_search()
+
+                    raise
+
+            if hasattr(client, "search"):
+                return execute_legacy_search()
+
             raise TypeError(
                 "The installed qdrant-client does not support "
                 "query_points() or search()."
             )
 
-        return await asyncio.to_thread(
-            execute_search
-        )
+        try:
+            print(
+                "Starting Qdrant search:",
+                {
+                    "collection": (
+                        self.qdrant_collection_name
+                    ),
+                    "topK": self.top_k,
+                    "scoreThreshold": (
+                        self.score_threshold
+                    ),
+                    "companyId": company_id,
+                },
+            )
+
+            results = await asyncio.to_thread(
+                execute_search
+            )
+
+            print(
+                "Qdrant search completed:",
+                {
+                    "resultCount": len(results),
+                },
+            )
+
+            return results
+
+        except Exception as exc:
+            print(
+                "Qdrant search failed:",
+                {
+                    "errorType": type(exc).__name__,
+                    "statusCode": getattr(
+                        exc,
+                        "status_code",
+                        None,
+                    ),
+                    "message": str(exc),
+                },
+            )
+
+            raise RuntimeError(
+                "Qdrant search failed. "
+                f"Error type: "
+                f"{type(exc).__name__}. "
+                f"Message: {exc}"
+            ) from exc
 
     def normalize_qdrant_results(
         self,
@@ -1631,6 +1810,8 @@ class RequirementEvidenceSummaryAgent:
         )
 
         try:
+            await self.validate_qdrant_collection()
+
             semaphore = asyncio.Semaphore(
                 self.max_concurrency
             )
@@ -1755,6 +1936,24 @@ class RequirementEvidenceSummaryAgent:
             }
 
         except Exception as exc:
+            print(
+                "Evidence Summary Agent failed:",
+                {
+                    "errorType": type(exc).__name__,
+                    "statusCode": getattr(
+                        exc,
+                        "status_code",
+                        None,
+                    ),
+                    "errorCode": getattr(
+                        exc,
+                        "code",
+                        None,
+                    ),
+                    "message": str(exc),
+                },
+            )
+
             failed_at = utc_now()
 
             await asyncio.to_thread(
