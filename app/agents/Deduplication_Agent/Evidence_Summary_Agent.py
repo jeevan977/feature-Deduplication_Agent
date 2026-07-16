@@ -1,5 +1,4 @@
 
-
 # from __future__ import annotations
 
 # import asyncio
@@ -2133,69 +2132,142 @@
 
 #     async def log_llm_token_usage(
 #         self,
-#         response: Any,
+#         usage: Mapping[str, Any],
 #         *,
 #         bearer_token: str | None,
 #         company_id: str,
 #         tender_id: str,
+#         project_id: str,
+#         user_id: str,
 #         evidence_summary_id: str,
 #         source_ids: list[str],
 #         duration: float,
 #     ) -> None:
-#         usage = (
-#             TokenUsageService.extract_token_usage(
-#                 response
+#         """
+#         Send one aggregated token-usage log for the complete
+#         Evidence Summary Agent run.
+
+#         The bearer token is used only for the token-usage API.
+#         It is never written to MongoDB or enterprise logs.
+#         """
+
+#         input_tokens = int(
+#             usage.get(
+#                 "input_tokens",
+#                 0,
+#             )
+#             or 0
+#         )
+
+#         output_tokens = int(
+#             usage.get(
+#                 "output_tokens",
+#                 0,
+#             )
+#             or 0
+#         )
+
+#         total_tokens = int(
+#             usage.get(
+#                 "total_tokens",
+#                 input_tokens + output_tokens,
+#             )
+#             or (
+#                 input_tokens
+#                 + output_tokens
 #             )
 #         )
+
+#         model_name = str(
+#             usage.get(
+#                 "model",
+#                 "",
+#             )
+#             or ""
+#         ).strip()
 
 #         payload = {
 #             "applicationName": "Evidence Summary",
 #             "sourceIds": source_ids,
 #             "runId": evidence_summary_id,
-#             "userId": "",
+#             "userId": user_id,
 #             "purpose": "Evidence Summary",
 #             "method": "ainvoke",
 #             "agentName": "Evidence Summary Agent",
 #             "usageType": "LLM",
-#             "inputToken": usage.get(
-#                 "input_tokens",
-#                 0,
-#             ),
-#             "outputToken": usage.get(
-#                 "output_tokens",
-#                 0,
-#             ),
-#             "totalTokens": usage.get(
-#                 "total_tokens",
-#                 0,
-#             ),
-#             "model": usage.get(
-#                 "model",
-#                 "",
-#             ),
+#             "inputToken": input_tokens,
+#             "outputToken": output_tokens,
+#             "totalTokens": total_tokens,
+#             "model": model_name,
 #             "duration": round(
-#                 duration,
+#                 float(duration or 0),
 #                 3,
 #             ),
+#             # TokenUsageService calculates cost using the model
+#             # pricing table when value is zero.
 #             "cost": {
 #                 "currency": "USD",
 #                 "value": 0,
 #             },
 #             "companyId": company_id,
 #             "tenderId": tender_id,
-#             "projectId": "",
+#             "projectId": project_id,
 #         }
+
+#         print(
+#             "Evidence Summary token logging state:",
+#             {
+#                 "bearerTokenPresent": bool(
+#                     bearer_token
+#                 ),
+#                 "bearerTokenLength": (
+#                     len(bearer_token)
+#                     if bearer_token
+#                     else 0
+#                 ),
+#                 "companyId": company_id,
+#                 "tenderId": tender_id,
+#                 "projectId": project_id,
+#                 "userId": user_id,
+#                 "runId": evidence_summary_id,
+#                 "inputToken": input_tokens,
+#                 "outputToken": output_tokens,
+#                 "totalTokens": total_tokens,
+#                 "model": model_name,
+#                 "duration": payload[
+#                     "duration"
+#                 ],
+#                 "sourceIdCount": len(
+#                     source_ids
+#                 ),
+#             },
+#         )
 
 #         result = await TokenUsageService.log_usage(
 #             payload=payload,
 #             bearer_token=bearer_token,
 #         )
 
-#         if not result.get("success", False):
+#         if not result.get(
+#             "success",
+#             False,
+#         ):
 #             print(
-#                 "Evidence Summary token usage logging failed:",
+#                 "Evidence Summary token usage "
+#                 "logging failed:",
 #                 result,
 #             )
+#             return
+
+#         print(
+#             "Evidence Summary token usage "
+#             "logged successfully:",
+#             {
+#                 "runId": evidence_summary_id,
+#                 "model": model_name,
+#                 "totalTokens": total_tokens,
+#             },
+#         )
 
 #     async def process_requirement(
 #         self,
@@ -2388,17 +2460,47 @@
 #                 ).strip()
 #             ]
 
-#             await self.log_llm_token_usage(
-#                 response=llm_response,
-#                 bearer_token=bearer_token,
-#                 company_id=company_id,
-#                 tender_id=tender_id,
-#                 evidence_summary_id=(
-#                     evidence_summary_id
-#                 ),
-#                 source_ids=source_ids,
-#                 duration=llm_duration,
+#             llm_usage = (
+#                 TokenUsageService.extract_token_usage(
+#                     llm_response
+#                 )
 #             )
+
+#             token_usage_record = {
+#                 "input_tokens": int(
+#                     llm_usage.get(
+#                         "input_tokens",
+#                         0,
+#                     )
+#                     or 0
+#                 ),
+#                 "output_tokens": int(
+#                     llm_usage.get(
+#                         "output_tokens",
+#                         0,
+#                     )
+#                     or 0
+#                 ),
+#                 "total_tokens": int(
+#                     llm_usage.get(
+#                         "total_tokens",
+#                         0,
+#                     )
+#                     or 0
+#                 ),
+#                 "model": str(
+#                     llm_usage.get(
+#                         "model",
+#                         "",
+#                     )
+#                     or ""
+#                 ).strip(),
+#                 "duration": float(
+#                     llm_duration
+#                     or 0
+#                 ),
+#                 "source_ids": source_ids,
+#             }
 
 #             confidence_value = (
 #                 parsed_result.get(
@@ -2500,6 +2602,9 @@
 #                 "MissingEvidenceReason": (
 #                     missing_evidence_reason
 #                 ),
+#                 # Internal-only usage information. generate() removes
+#                 # this field before saving the EvidenceSummary item.
+#                 "_TokenUsage": token_usage_record,
 #             }
 
 #     def normalize_request_payload(
@@ -2754,6 +2859,228 @@
 
 #                 raise
 
+#             # ------------------------------------------------
+#             # Aggregate Evidence Summary LLM usage for this run.
+#             # One token-usage HTTP request is sent, matching the
+#             # run-level logging behaviour used by Agent 1.
+#             # ------------------------------------------------
+
+#             token_usage_records: list[
+#                 Mapping[str, Any]
+#             ] = []
+
+#             for evidence_summary in (
+#                 evidence_summaries
+#             ):
+#                 token_usage_record = (
+#                     evidence_summary.pop(
+#                         "_TokenUsage",
+#                         None,
+#                     )
+#                 )
+
+#                 if isinstance(
+#                     token_usage_record,
+#                     Mapping,
+#                 ):
+#                     token_usage_records.append(
+#                         token_usage_record
+#                     )
+
+#             if token_usage_records:
+#                 total_input_tokens = sum(
+#                     int(
+#                         record.get(
+#                             "input_tokens",
+#                             0,
+#                         )
+#                         or 0
+#                     )
+#                     for record in (
+#                         token_usage_records
+#                     )
+#                 )
+
+#                 total_output_tokens = sum(
+#                     int(
+#                         record.get(
+#                             "output_tokens",
+#                             0,
+#                         )
+#                         or 0
+#                     )
+#                     for record in (
+#                         token_usage_records
+#                     )
+#                 )
+
+#                 total_tokens = sum(
+#                     int(
+#                         record.get(
+#                             "total_tokens",
+#                             0,
+#                         )
+#                         or (
+#                             int(
+#                                 record.get(
+#                                     "input_tokens",
+#                                     0,
+#                                 )
+#                                 or 0
+#                             )
+#                             + int(
+#                                 record.get(
+#                                     "output_tokens",
+#                                     0,
+#                                 )
+#                                 or 0
+#                             )
+#                         )
+#                     )
+#                     for record in (
+#                         token_usage_records
+#                     )
+#                 )
+
+#                 total_llm_duration = sum(
+#                     float(
+#                         record.get(
+#                             "duration",
+#                             0,
+#                         )
+#                         or 0
+#                     )
+#                     for record in (
+#                         token_usage_records
+#                     )
+#                 )
+
+#                 model_names = [
+#                     str(
+#                         record.get(
+#                             "model",
+#                             "",
+#                         )
+#                         or ""
+#                     ).strip()
+#                     for record in (
+#                         token_usage_records
+#                     )
+#                     if str(
+#                         record.get(
+#                             "model",
+#                             "",
+#                         )
+#                         or ""
+#                     ).strip()
+#                 ]
+
+#                 model_name = (
+#                     model_names[0]
+#                     if model_names
+#                     else str(
+#                         os.getenv(
+#                             "OPENAI_MODEL",
+#                             "",
+#                         )
+#                         or os.getenv(
+#                             "MISTRAL_MODEL",
+#                             "",
+#                         )
+#                         or os.getenv(
+#                             "GROQ_MODEL",
+#                             "",
+#                         )
+#                         or ""
+#                     ).strip()
+#                 )
+
+#                 unique_source_ids: list[str] = []
+#                 seen_source_ids: set[str] = set()
+
+#                 for record in token_usage_records:
+#                     record_source_ids = (
+#                         record.get(
+#                             "source_ids",
+#                             [],
+#                         )
+#                     )
+
+#                     if not isinstance(
+#                         record_source_ids,
+#                         Sequence,
+#                     ) or isinstance(
+#                         record_source_ids,
+#                         (
+#                             str,
+#                             bytes,
+#                             bytearray,
+#                         ),
+#                     ):
+#                         record_source_ids = [
+#                             record_source_ids
+#                         ]
+
+#                     for source_id_value in (
+#                         record_source_ids
+#                     ):
+#                         source_id = str(
+#                             source_id_value
+#                             or ""
+#                         ).strip()
+
+#                         if (
+#                             not source_id
+#                             or source_id
+#                             in seen_source_ids
+#                         ):
+#                             continue
+
+#                         seen_source_ids.add(
+#                             source_id
+#                         )
+#                         unique_source_ids.append(
+#                             source_id
+#                         )
+
+#                 await self.log_llm_token_usage(
+#                     usage={
+#                         "input_tokens": (
+#                             total_input_tokens
+#                         ),
+#                         "output_tokens": (
+#                             total_output_tokens
+#                         ),
+#                         "total_tokens": (
+#                             total_tokens
+#                         ),
+#                         "model": model_name,
+#                     },
+#                     bearer_token=(
+#                         dynamic_bearer_token
+#                     ),
+#                     company_id=company_id,
+#                     tender_id=tender_id,
+#                     project_id=project_id,
+#                     user_id=user_id,
+#                     evidence_summary_id=(
+#                         evidence_summary_id
+#                     ),
+#                     source_ids=(
+#                         unique_source_ids
+#                     ),
+#                     duration=(
+#                         total_llm_duration
+#                     ),
+#                 )
+
+#             else:
+#                 print(
+#                     "Evidence Summary token logging "
+#                     "skipped: no Evidence Summary LLM "
+#                     "call was made."
+#                 )
+
 #             evidence_found_count = sum(
 #                 1
 #                 for evidence_summary in evidence_summaries
@@ -2952,6 +3279,7 @@
 
 # EvidenceSummaryAgent = RequirementEvidenceSummaryAgent
 # Agent = RequirementEvidenceSummaryAgent
+
 
 
 
@@ -6031,10 +6359,38 @@ class RequirementEvidenceSummaryAgent:
                 )
 
             else:
+                # No Qdrant evidence means the Evidence Summary LLM
+                # was not called. Still create one run-level usage
+                # record with zero tokens so the Evidence Agent run
+                # remains visible in the central token log.
+                await self.log_llm_token_usage(
+                    usage={
+                        "input_tokens": 0,
+                        "output_tokens": 0,
+                        "total_tokens": 0,
+                        "model": (
+                            TokenUsageService
+                            .resolve_configured_model_name()
+                        ),
+                    },
+                    bearer_token=(
+                        dynamic_bearer_token
+                    ),
+                    company_id=company_id,
+                    tender_id=tender_id,
+                    project_id=project_id,
+                    user_id=user_id,
+                    evidence_summary_id=(
+                        evidence_summary_id
+                    ),
+                    source_ids=[],
+                    duration=0.0,
+                )
+
                 print(
-                    "Evidence Summary token logging "
-                    "skipped: no Evidence Summary LLM "
-                    "call was made."
+                    "Evidence Summary zero-token run "
+                    "logged because no Evidence Summary "
+                    "LLM call was required."
                 )
 
             evidence_found_count = sum(
