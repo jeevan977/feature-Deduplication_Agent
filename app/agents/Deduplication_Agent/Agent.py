@@ -201,12 +201,38 @@ class RequirementDeduplicationAgent:
 
             return result
 
+        # except Exception as exc:
+        #     failed_payload = {
+        #         **common_payload,
+        #         "error": str(exc),
+        #         "errorType": type(exc).__name__,
+        #     }
+
         except Exception as exc:
+            print(
+                "Requirement Deduplication Agent failed:",
+                {
+                    "errorType": type(exc).__name__,
+                    "message": str(exc),
+                    "statusCode": getattr(
+                        exc,
+                        "status_code",
+                        None,
+                    ),
+                    "errorCode": getattr(
+                        exc,
+                        "code",
+                        None,
+                    ),
+                },
+            )
+
             failed_payload = {
                 **common_payload,
                 "error": str(exc),
                 "errorType": type(exc).__name__,
             }
+
 
             await asyncio.to_thread(
                 self._logger.end,
