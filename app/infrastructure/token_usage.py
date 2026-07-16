@@ -35,8 +35,53 @@
 
 
 # class TokenUsageService:
-#     MISTRAL_LARGE_INPUT_COST_PER_MILLION = 0.50
-#     MISTRAL_LARGE_OUTPUT_COST_PER_MILLION = 1.50
+#     """
+#     Shared token-usage and cost service.
+
+#     Prices are USD per 1,000,000 tokens. Keep this table aligned
+#     with the exact model configured in the environment.
+#     """
+
+#     MODEL_PRICING_PER_MILLION: dict[
+#         str,
+#         dict[str, float],
+#     ] = {
+#         # Mistral models used by the project.
+#         "mistral-large-latest": {
+#             "input": 0.50,
+#             "output": 1.50,
+#         },
+#         "mistral-large-2512": {
+#             "input": 0.50,
+#             "output": 1.50,
+#         },
+
+#         # OpenAI chat models supported by the project.
+#         "gpt-4o-mini": {
+#             "input": 0.15,
+#             "output": 0.60,
+#         },
+#         "gpt-4o-mini-2024-07-18": {
+#             "input": 0.15,
+#             "output": 0.60,
+#         },
+#         "gpt-4.1-mini": {
+#             "input": 0.40,
+#             "output": 1.60,
+#         },
+#         "gpt-4.1-mini-2025-04-14": {
+#             "input": 0.40,
+#             "output": 1.60,
+#         },
+
+#         # Used by the Evidence Summary Agent for Qdrant queries.
+#         # This entry is available for embedding-usage logs when
+#         # exact embedding token counts are supplied.
+#         "text-embedding-3-small": {
+#             "input": 0.02,
+#             "output": 0.0,
+#         },
+#     }
 
 #     @staticmethod
 #     def _get_value(
@@ -76,23 +121,24 @@
 #         output_tokens: int,
 #     ) -> float:
 #         """
-#         Calculate token cost in USD.
+#         Calculate the model cost in USD.
 
-#         Mistral Large pricing:
-#         - Input:  USD 0.50 per 1,000,000 tokens
-#         - Output: USD 1.50 per 1,000,000 tokens
+#         The input/output rates are read from
+#         MODEL_PRICING_PER_MILLION. Unknown models return zero rather
+#         than using an incorrect provider price.
 #         """
 
 #         normalized_model = str(
 #             model or ""
 #         ).strip().lower()
 
-#         supported_models = {
-#             "mistral-large-latest",
-#             "mistral-large-2512",
-#         }
+#         pricing = (
+#             TokenUsageService
+#             .MODEL_PRICING_PER_MILLION
+#             .get(normalized_model)
+#         )
 
-#         if normalized_model not in supported_models:
+#         if pricing is None:
 #             logger.warning(
 #                 "Token cost was not calculated because "
 #                 "pricing is not configured for model: %s",
@@ -112,23 +158,70 @@
 #             )
 #         )
 
+#         input_rate = (
+#             TokenUsageService._to_float(
+#                 pricing.get("input", 0)
+#             )
+#         )
+
+#         output_rate = (
+#             TokenUsageService._to_float(
+#                 pricing.get("output", 0)
+#             )
+#         )
+
 #         input_cost = (
 #             normalized_input_tokens
 #             / 1_000_000
-#         ) * (
-#             TokenUsageService
-#             .MISTRAL_LARGE_INPUT_COST_PER_MILLION
-#         )
+#         ) * input_rate
 
 #         output_cost = (
 #             normalized_output_tokens
 #             / 1_000_000
-#         ) * (
-#             TokenUsageService
-#             .MISTRAL_LARGE_OUTPUT_COST_PER_MILLION
+#         ) * output_rate
+
+#         return round(
+#             input_cost + output_cost,
+#             8,
 #         )
 
-#         return input_cost + output_cost
+#     @staticmethod
+#     def resolve_configured_model_name() -> str:
+#         """
+#         Return the model selected in .env.
+
+#         This is used only when a provider response does not include
+#         model metadata.
+#         """
+
+#         provider = str(
+#             os.getenv("LLM_PROVIDER", "")
+#             or ""
+#         ).strip().lower()
+
+#         environment_variable_by_provider = {
+#             "openai": "OPENAI_MODEL",
+#             "mistral": "MISTRAL_MODEL",
+#             "groq": "GROQ_MODEL",
+#         }
+
+#         environment_variable = (
+#             environment_variable_by_provider.get(
+#                 provider,
+#                 "",
+#             )
+#         )
+
+#         if not environment_variable:
+#             return ""
+
+#         return str(
+#             os.getenv(
+#                 environment_variable,
+#                 "",
+#             )
+#             or ""
+#         ).strip()
 
 #     @staticmethod
 #     def _to_source_ids(
@@ -274,6 +367,7 @@
 #                 "model_name",
 #                 "",
 #             )
+#             or TokenUsageService.resolve_configured_model_name()
 #             or ""
 #         )
 
@@ -694,6 +788,8 @@
 #                 "status_code": 500,
 #                 "message": str(exc),
 #             }
+
+
 
 
 
@@ -1486,6 +1582,3 @@ class TokenUsageService:
                 "status_code": 500,
                 "message": str(exc),
             }
-
-
-            

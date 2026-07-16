@@ -1,6 +1,5 @@
 
 
-
 # from __future__ import annotations
 
 # import asyncio
@@ -688,6 +687,13 @@
 #     intent_values: Mapping[str, Any],
 #     evidence_sources: list[dict[str, Any]],
 # ) -> str:
+#     """
+#     Build the LLM prompt for one deduplicated requirement.
+
+#     The LLM receives only the selected Qdrant evidence chunks and
+#     returns the compact evidence decision fields required by MongoDB.
+#     """
+
 #     evidence_blocks: list[str] = []
 
 #     for evidence_index, evidence_source in enumerate(
@@ -699,29 +705,37 @@
 #                 [
 #                     f"[Evidence {evidence_index}]",
 #                     (
-#                         "DocumentId: "
-#                         f"{evidence_source.get('DocumentId', '')}"
+#                         "EvidenceId: "
+#                         f"{evidence_source.get('EvidenceId', '')}"
 #                     ),
 #                     (
 #                         "ChunkId: "
 #                         f"{evidence_source.get('ChunkId', '')}"
 #                     ),
 #                     (
-#                         "FileName: "
-#                         f"{evidence_source.get('FileName', '')}"
+#                         "SourceTitle: "
+#                         f"{evidence_source.get('SourceTitle', '')}"
 #                     ),
 #                     (
-#                         "Section: "
-#                         f"{evidence_source.get('Section', '')}"
+#                         "SourceDocument: "
+#                         f"{evidence_source.get('SourceDocument', '')}"
 #                     ),
 #                     (
-#                         "SimilarityScore: "
-#                         f"{evidence_source.get('Score', 0)}"
+#                         "DocumentType: "
+#                         f"{evidence_source.get('DocumentType', '')}"
 #                     ),
-#                     "ChunkText:",
+#                     (
+#                         "RelatedSection: "
+#                         f"{evidence_source.get('RelatedSection', '')}"
+#                     ),
+#                     (
+#                         "EvidenceScore: "
+#                         f"{evidence_source.get('EvidenceScore', 0)}"
+#                     ),
+#                     "EvidenceText:",
 #                     str(
 #                         evidence_source.get(
-#                             "ChunkText",
+#                             "EvidenceText",
 #                             "",
 #                         )
 #                     ),
@@ -736,14 +750,18 @@
 #     return f"""
 # You are the Evidence Summary Agent for a tender-response system.
 
-# Your task is to evaluate whether the retrieved company evidence supports the tender requirement and produce a concise, factual evidence summary.
+# Evaluate whether the retrieved company evidence supports the tender requirement.
 
 # STRICT RULES:
 # 1. Use only the supplied evidence chunks.
-# 2. Do not invent clients, projects, certifications, numbers, dates, technologies, outcomes or capabilities.
-# 3. If the evidence is weak, indirect or incomplete, state the gap clearly.
-# 4. Do not copy large passages verbatim.
-# 5. Return valid JSON only. Do not use markdown or code fences.
+# 2. Do not invent clients, projects, certifications, figures, dates, technologies, outcomes or capabilities.
+# 3. EvidenceFound must be true only when the supplied chunks materially support the requirement.
+# 4. EvidenceReason must briefly explain why the evidence supports or does not support the requirement.
+# 5. EvidenceSummary must be concise and grounded only in the supplied evidence.
+# 6. MissingEvidenceReason must be null when EvidenceFound is true.
+# 7. When EvidenceFound is false, EvidenceSummary must be an empty string and MissingEvidenceReason must clearly state what evidence is missing.
+# 8. EvidenceConfidence must be a number between 0 and 1.
+# 9. Return valid JSON only. Do not return markdown or code fences.
 
 # TENDER REQUIREMENT:
 # {canonical_requirement}
@@ -763,14 +781,11 @@
 # Return exactly this JSON structure:
 # {{
 #   "EvidenceFound": true,
-#   "EvidenceSummary": "Concise evidence summary grounded only in the retrieved chunks.",
-#   "MatchedCapabilities": ["Capability supported by the evidence"],
-#   "EvidenceGaps": ["Any important requirement element not supported by the evidence"],
-#   "Confidence": 0.0
+#   "EvidenceReason": "Why the supplied evidence does or does not support the requirement.",
+#   "EvidenceSummary": "Concise evidence summary grounded only in the supplied chunks.",
+#   "EvidenceConfidence": 0.0,
+#   "MissingEvidenceReason": null
 # }}
-
-# Confidence must be a number between 0 and 1.
-# If the retrieved chunks do not provide relevant evidence, return EvidenceFound as false, EvidenceSummary as an empty string, MatchedCapabilities as an empty list, and explain the missing evidence in EvidenceGaps.
 # """.strip()
 
 
@@ -1899,6 +1914,11 @@
 #         self,
 #         points: list[Any],
 #     ) -> list[dict[str, Any]]:
+#         """
+#         Convert raw Qdrant points into the compact evidence-source
+#         structure stored in MongoDB and supplied to the LLM.
+#         """
+
 #         normalized_results: list[
 #             dict[str, Any]
 #         ] = []
@@ -1915,11 +1935,11 @@
 #             if not isinstance(payload, Mapping):
 #                 payload = {}
 
-#             chunk_text = extract_payload_text(
+#             evidence_text = extract_payload_text(
 #                 payload
 #             )
 
-#             if not chunk_text:
+#             if not evidence_text:
 #                 continue
 
 #             remaining_characters = (
@@ -1935,11 +1955,13 @@
 #                 remaining_characters,
 #             )
 
-#             chunk_text = chunk_text[
+#             evidence_text = evidence_text[
 #                 :allowed_characters
 #             ]
 
-#             total_characters += len(chunk_text)
+#             total_characters += len(
+#                 evidence_text
+#             )
 
 #             point_id = getattr(
 #                 point,
@@ -1953,21 +1975,61 @@
 #                 0,
 #             )
 
+#             document_id = extract_payload_metadata(
+#                 payload,
+#                 "DocumentId",
+#                 "documentId",
+#                 "document_id",
+#                 "metadata.DocumentId",
+#                 "metadata.documentId",
+#                 "metadata.document_id",
+#             )
+
+#             source_title = extract_payload_metadata(
+#                 payload,
+#                 "SourceTitle",
+#                 "sourceTitle",
+#                 "source_title",
+#                 "Title",
+#                 "title",
+#                 "DocumentTitle",
+#                 "documentTitle",
+#                 "Heading",
+#                 "heading",
+#                 "metadata.SourceTitle",
+#                 "metadata.sourceTitle",
+#                 "metadata.title",
+#                 "metadata.Heading",
+#                 "metadata.heading",
+#             )
+
+#             source_document = extract_payload_metadata(
+#                 payload,
+#                 "SourceDocument",
+#                 "sourceDocument",
+#                 "source_document",
+#                 "DocumentName",
+#                 "documentName",
+#                 "FileName",
+#                 "fileName",
+#                 "file_name",
+#                 "SourceFileName",
+#                 "sourceFileName",
+#                 "metadata.SourceDocument",
+#                 "metadata.DocumentName",
+#                 "metadata.FileName",
+#                 "metadata.fileName",
+#                 "metadata.file_name",
+#                 "metadata.source",
+#             )
+
+#             if not source_document:
+#                 source_document = document_id
+
 #             normalized_results.append(
 #                 {
-#                     "PointId": str(point_id),
-#                     "Score": round(
-#                         float(point_score or 0),
-#                         6,
-#                     ),
-#                     "DocumentId": extract_payload_metadata(
-#                         payload,
-#                         "DocumentId",
-#                         "documentId",
-#                         "document_id",
-#                         "metadata.DocumentId",
-#                         "metadata.documentId",
-#                         "metadata.document_id",
+#                     "EvidenceId": str(
+#                         point_id
 #                     ),
 #                     "ChunkId": extract_payload_metadata(
 #                         payload,
@@ -1978,43 +2040,74 @@
 #                         "metadata.chunkId",
 #                         "metadata.chunk_id",
 #                     ),
-#                     "FileName": extract_payload_metadata(
-#                         payload,
-#                         "FileName",
-#                         "fileName",
-#                         "file_name",
-#                         "SourceFileName",
-#                         "sourceFileName",
-#                         "metadata.FileName",
-#                         "metadata.fileName",
-#                         "metadata.file_name",
-#                         "metadata.source",
+#                     "SourceTitle": source_title,
+#                     "SourceDocument": (
+#                         source_document
 #                     ),
-#                     "FilePath": extract_payload_metadata(
-#                         payload,
-#                         "FilePath",
-#                         "filePath",
-#                         "file_path",
-#                         "metadata.FilePath",
-#                         "metadata.filePath",
-#                         "metadata.file_path",
+#                     "DocumentType": (
+#                         extract_payload_metadata(
+#                             payload,
+#                             "DocumentType",
+#                             "documentType",
+#                             "document_type",
+#                             "FileType",
+#                             "fileType",
+#                             "file_type",
+#                             "Type",
+#                             "type",
+#                             "metadata.DocumentType",
+#                             "metadata.documentType",
+#                             "metadata.FileType",
+#                             "metadata.type",
+#                         )
 #                     ),
-#                     "Section": extract_payload_metadata(
-#                         payload,
-#                         "Section",
-#                         "section",
-#                         "SectionName",
-#                         "sectionName",
-#                         "Heading",
-#                         "heading",
-#                         "metadata.Section",
-#                         "metadata.section",
-#                         "metadata.SectionName",
-#                         "metadata.sectionName",
-#                         "metadata.Heading",
-#                         "metadata.heading",
+#                     "RelatedSection": (
+#                         extract_payload_metadata(
+#                             payload,
+#                             "RelatedSection",
+#                             "relatedSection",
+#                             "related_section",
+#                             "Section",
+#                             "section",
+#                             "SectionName",
+#                             "sectionName",
+#                             "Heading",
+#                             "heading",
+#                             "metadata.RelatedSection",
+#                             "metadata.Section",
+#                             "metadata.section",
+#                             "metadata.SectionName",
+#                             "metadata.sectionName",
+#                             "metadata.Heading",
+#                             "metadata.heading",
+#                         )
 #                     ),
-#                     "ChunkText": chunk_text,
+#                     "EvidenceText": evidence_text,
+#                     "EvidenceScore": round(
+#                         float(point_score or 0),
+#                         6,
+#                     ),
+#                     "EvidenceDate": (
+#                         extract_payload_metadata(
+#                             payload,
+#                             "EvidenceDate",
+#                             "evidenceDate",
+#                             "evidence_date",
+#                             "DocumentDate",
+#                             "documentDate",
+#                             "document_date",
+#                             "CreatedAt",
+#                             "createdAt",
+#                             "created_at",
+#                             "UpdatedAt",
+#                             "updatedAt",
+#                             "updated_at",
+#                             "metadata.EvidenceDate",
+#                             "metadata.DocumentDate",
+#                             "metadata.CreatedAt",
+#                             "metadata.UpdatedAt",
+#                         )
+#                     ),
 #                 }
 #             )
 
@@ -2113,8 +2206,16 @@
 #         tender_id: str,
 #         evidence_summary_id: str,
 #         bearer_token: str | None,
+#         item_status: str,
 #         semaphore: asyncio.Semaphore,
 #     ) -> dict[str, Any]:
+#         """
+#         Generate exactly one evidence-summary item for one Agent 1
+#         deduplicated requirement.
+
+#         A result is returned even when Qdrant finds no evidence.
+#         """
+
 #         async with semaphore:
 #             canonical_requirement = str(
 #                 get_first_value(
@@ -2143,11 +2244,52 @@
 #                         f"DEDUP-{requirement_number:04d}"
 #                     ),
 #                 )
+#             ).strip()
+
+#             requirement_type = str(
+#                 get_first_value(
+#                     requirement,
+#                     "RequirementType",
+#                     "requirementType",
+#                     "requirement_type",
+#                     default="",
+#                 )
+#                 or ""
+#             ).strip()
+
+#             requirement_ids = normalize_string_list(
+#                 get_first_value(
+#                     requirement,
+#                     "RequirementIds",
+#                     "requirementIds",
+#                     default=[],
+#                 )
 #             )
 
 #             intent_values = collect_intent_values(
 #                 requirement
 #             )
+
+#             intent_result = {
+#                 "CapabilityIntent": (
+#                     intent_values.get(
+#                         "CapabilityIntent",
+#                         [],
+#                     )
+#                 ),
+#                 "EvidenceSections": (
+#                     intent_values.get(
+#                         "EvidenceSections",
+#                         [],
+#                     )
+#                 ),
+#                 "SemanticAnchors": (
+#                     intent_values.get(
+#                         "SemanticAnchors",
+#                         [],
+#                     )
+#                 ),
+#             }
 
 #             search_query = build_evidence_search_query(
 #                 canonical_requirement=(
@@ -2167,12 +2309,6 @@
 #                 )
 #             )
 
-#             generation_fields = (
-#                 build_generation_fields(
-#                     requirement
-#                 )
-#             )
-
 #             base_output = {
 #                 "EvidenceSummaryItemId": (
 #                     f"EVIDENCE-{requirement_number:04d}"
@@ -2180,58 +2316,37 @@
 #                 "DeduplicatedRequirementId": (
 #                     deduplicated_requirement_id
 #                 ),
+#                 "RequirementIds": (
+#                     requirement_ids
+#                 ),
 #                 "CanonicalRequirement": (
 #                     canonical_requirement
 #                 ),
-#                 "RequirementIds": normalize_string_list(
-#                     get_first_value(
-#                         requirement,
-#                         "RequirementIds",
-#                         "requirementIds",
-#                         default=[],
-#                     )
+#                 "RequirementType": (
+#                     requirement_type
 #                 ),
-#                 "CapabilityIntent": intent_values.get(
-#                     "CapabilityIntent",
-#                     [],
-#                 ),
-#                 "EvidenceSections": intent_values.get(
-#                     "EvidenceSections",
-#                     [],
-#                 ),
-#                 "SemanticAnchors": intent_values.get(
-#                     "SemanticAnchors",
-#                     [],
-#                 ),
-#                 "SearchQuery": search_query,
-#                 "QdrantMatchCount": len(
-#                     evidence_sources
-#                 ),
-#                 "TopQdrantScore": (
-#                     evidence_sources[0].get(
-#                         "Score",
-#                         0,
-#                     )
-#                     if evidence_sources
-#                     else 0
-#                 ),
+#                 "IntentResult": intent_result,
 #                 "EvidenceSources": evidence_sources,
-#                 **generation_fields,
+#                 "Status": item_status,
 #             }
 
+#             # Every requirement receives an output item. When Qdrant
+#             # returns nothing, no LLM call is made.
 #             if not evidence_sources:
 #                 return {
 #                     **base_output,
 #                     "EvidenceFound": False,
+#                     "EvidenceReason": (
+#                         "No relevant company evidence was "
+#                         "retrieved from Qdrant."
+#                     ),
 #                     "EvidenceSummary": "",
-#                     "MatchedCapabilities": [],
-#                     "EvidenceGaps": [
-#                         (
-#                             "No company evidence chunks met "
-#                             "the configured Qdrant relevance threshold."
-#                         )
-#                     ],
-#                     "Confidence": 0.0,
+#                     "EvidenceConfidence": 0.0,
+#                     "MissingEvidenceReason": (
+#                         "No company evidence chunks matched "
+#                         "the requirement, CompanyId and "
+#                         "configured relevance threshold."
+#                     ),
 #                 }
 
 #             prompt = build_evidence_summary_prompt(
@@ -2260,14 +2375,14 @@
 #             source_ids = [
 #                 str(
 #                     evidence_source.get(
-#                         "PointId",
+#                         "EvidenceId",
 #                         "",
 #                     )
 #                 )
 #                 for evidence_source in evidence_sources
 #                 if str(
 #                     evidence_source.get(
-#                         "PointId",
+#                         "EvidenceId",
 #                         "",
 #                     )
 #                 ).strip()
@@ -2285,22 +2400,30 @@
 #                 duration=llm_duration,
 #             )
 
-#             confidence_value = parsed_result.get(
-#                 "Confidence",
-#                 0,
+#             confidence_value = (
+#                 parsed_result.get(
+#                     "EvidenceConfidence",
+#                     parsed_result.get(
+#                         "Confidence",
+#                         0,
+#                     ),
+#                 )
 #             )
 
 #             try:
-#                 confidence = float(
+#                 evidence_confidence = float(
 #                     confidence_value or 0
 #                 )
 
 #             except (TypeError, ValueError):
-#                 confidence = 0.0
+#                 evidence_confidence = 0.0
 
-#             confidence = max(
+#             evidence_confidence = max(
 #                 0.0,
-#                 min(1.0, confidence),
+#                 min(
+#                     1.0,
+#                     evidence_confidence,
+#                 ),
 #             )
 
 #             evidence_found = normalize_boolean(
@@ -2310,6 +2433,14 @@
 #                 )
 #             )
 
+#             evidence_reason = str(
+#                 parsed_result.get(
+#                     "EvidenceReason",
+#                     "",
+#                 )
+#                 or ""
+#             ).strip()
+
 #             evidence_summary = str(
 #                 parsed_result.get(
 #                     "EvidenceSummary",
@@ -2318,34 +2449,56 @@
 #                 or ""
 #             ).strip()
 
-#             if not evidence_found:
+#             missing_evidence_reason_value = (
+#                 parsed_result.get(
+#                     "MissingEvidenceReason"
+#                 )
+#             )
+
+#             missing_evidence_reason = (
+#                 str(
+#                     missing_evidence_reason_value
+#                     or ""
+#                 ).strip()
+#             )
+
+#             if evidence_found:
+#                 missing_evidence_reason = None
+
+#                 if not evidence_reason:
+#                     evidence_reason = (
+#                         "The retrieved company evidence "
+#                         "materially supports the requirement."
+#                     )
+
+#             else:
 #                 evidence_summary = ""
+#                 evidence_confidence = 0.0
+
+#                 if not evidence_reason:
+#                     evidence_reason = (
+#                         "The retrieved chunks do not provide "
+#                         "sufficient support for the requirement."
+#                     )
+
+#                 if not missing_evidence_reason:
+#                     missing_evidence_reason = (
+#                         "The retrieved evidence does not "
+#                         "sufficiently demonstrate the required "
+#                         "capability, compliance or experience."
+#                     )
 
 #             return {
 #                 **base_output,
 #                 "EvidenceFound": evidence_found,
+#                 "EvidenceReason": evidence_reason,
 #                 "EvidenceSummary": evidence_summary,
-#                 "MatchedCapabilities": (
-#                     normalize_string_list(
-#                         parsed_result.get(
-#                             "MatchedCapabilities",
-#                             [],
-#                         )
-#                     )
-#                 ),
-#                 "EvidenceGaps": normalize_string_list(
-#                     parsed_result.get(
-#                         "EvidenceGaps",
-#                         [],
-#                     )
-#                 ),
-#                 "Confidence": round(
-#                     confidence,
+#                 "EvidenceConfidence": round(
+#                     evidence_confidence,
 #                     4,
 #                 ),
-#                 "LlmDurationSeconds": round(
-#                     llm_duration,
-#                     3,
+#                 "MissingEvidenceReason": (
+#                     missing_evidence_reason
 #                 ),
 #             }
 
@@ -2393,12 +2546,49 @@
 #             or ""
 #         ).strip()
 
+#         is_regenerate = normalize_boolean(
+#             payload.get("IsRegenerate")
+#             if "IsRegenerate" in payload
+#             else (
+#                 payload.get("isRegenerate")
+#                 if "isRegenerate" in payload
+#                 else payload.get("is_regenerate")
+#             )
+#         )
+
+#         user_id = str(
+#             payload.get("UserId")
+#             or payload.get("userId")
+#             or payload.get("user_id")
+#             or ""
+#         ).strip()
+
+#         user_name = str(
+#             payload.get("UserName")
+#             or payload.get("userName")
+#             or payload.get("user_name")
+#             or ""
+#         ).strip()
+
+#         project_id = str(
+#             payload.get("ProjectId")
+#             or payload.get("projectId")
+#             or payload.get("project_id")
+#             or ""
+#         ).strip()
+
 #         dynamic_bearer_token = (
 #             bearer_token
 #             or payload.get("Token")
 #             or payload.get("token")
 #             or payload.get("BearerToken")
 #             or payload.get("bearerToken")
+#         )
+
+#         final_status = (
+#             "IsRegenerated"
+#             if is_regenerate
+#             else "Active"
 #         )
 
 #         if not company_id:
@@ -2430,23 +2620,30 @@
 #             "CompanyId": company_id,
 #             "TenderId": tender_id,
 #             "DeduplicationId": deduplication_id,
-#             "SourceCollection": (
-#                 self.source_collection.name
-#             ),
-#             "SourceDocumentId": deduplication_id,
-#             "Input": {
-#                 "DeduplicatedRequirementCount": len(
+#             "IsRegenerate": is_regenerate,
+#             "UserId": user_id,
+#             "UserName": user_name,
+#             "ProjectId": project_id,
+#             "Summary": {
+#                 "TotalRequirements": len(
 #                     deduplicated_requirements
 #                 ),
+#                 "EvidenceFoundCount": 0,
+#                 "NoEvidenceFoundCount": len(
+#                     deduplicated_requirements
+#                 ),
+#                 "TotalEvidenceSummaries": 0,
 #             },
-#             "Output": None,
+#             "Output": {
+#                 "EvidenceSummaries": []
+#             },
 #             "Status": "Processing",
-#             "IsActive": True,
 #             "Error": None,
 #             "CreatedAt": created_at,
 #             "UpdatedAt": created_at,
 #             "CompletedAt": None,
 #         }
+
 
 #         insert_result = await asyncio.to_thread(
 #             self.destination_collection.insert_one,
@@ -2528,6 +2725,7 @@
 #                         bearer_token=(
 #                             dynamic_bearer_token
 #                         ),
+#                         item_status=final_status,
 #                         semaphore=semaphore,
 #                     )
 #                 )
@@ -2565,37 +2763,26 @@
 #                 )
 #             )
 
-#             regenerated_count = sum(
-#                 1
-#                 for evidence_summary in evidence_summaries
-#                 if evidence_summary.get(
-#                     "IsRegenerated",
-#                     False,
-#                 )
-#             )
-
-#             output = {
-#                 "Summary": {
-#                     "TotalDeduplicatedRequirements": len(
-#                         deduplicated_requirements
-#                     ),
-#                     "EvidenceFoundCount": (
-#                         evidence_found_count
-#                     ),
-#                     "NoEvidenceFoundCount": (
-#                         len(evidence_summaries)
-#                         - evidence_found_count
-#                     ),
-#                     "RegeneratedRequirementCount": (
-#                         regenerated_count
-#                     ),
-#                     "TotalEvidenceSummaries": len(
-#                         evidence_summaries
-#                     ),
-#                 },
-#                 "EvidenceSummaries": (
+#             summary = {
+#                 "TotalRequirements": len(
+#                     deduplicated_requirements
+#                 ),
+#                 "EvidenceFoundCount": (
+#                     evidence_found_count
+#                 ),
+#                 "NoEvidenceFoundCount": (
+#                     len(evidence_summaries)
+#                     - evidence_found_count
+#                 ),
+#                 "TotalEvidenceSummaries": len(
 #                     evidence_summaries
 #                 ),
+#             }
+
+#             output = {
+#                 "EvidenceSummaries": (
+#                     evidence_summaries
+#                 )
 #             }
 
 #             completed_at = utc_now()
@@ -2607,14 +2794,16 @@
 #                 },
 #                 {
 #                     "$set": {
+#                         "Summary": summary,
 #                         "Output": output,
-#                         "Status": "IsRegenerated",
+#                         "Status": final_status,
 #                         "Error": None,
 #                         "UpdatedAt": completed_at,
 #                         "CompletedAt": completed_at,
 #                     }
 #                 },
 #             )
+
 
 #             await asyncio.to_thread(
 #                 self._logger.end,
@@ -2645,8 +2834,11 @@
 #                 "EvidenceSummaryId": (
 #                     evidence_summary_id
 #                 ),
-#                 "Status": "IsRegenerated",
-#                 "Result": output,
+#                 "Status": final_status,
+#                 "Result": {
+#                     "Summary": summary,
+#                     "Output": output,
+#                 },
 #             }
 
 #         except Exception as exc:
@@ -2760,7 +2952,6 @@
 
 # EvidenceSummaryAgent = RequirementEvidenceSummaryAgent
 # Agent = RequirementEvidenceSummaryAgent
-
 
 
 
@@ -4897,69 +5088,142 @@ class RequirementEvidenceSummaryAgent:
 
     async def log_llm_token_usage(
         self,
-        response: Any,
+        usage: Mapping[str, Any],
         *,
         bearer_token: str | None,
         company_id: str,
         tender_id: str,
+        project_id: str,
+        user_id: str,
         evidence_summary_id: str,
         source_ids: list[str],
         duration: float,
     ) -> None:
-        usage = (
-            TokenUsageService.extract_token_usage(
-                response
+        """
+        Send one aggregated token-usage log for the complete
+        Evidence Summary Agent run.
+
+        The bearer token is used only for the token-usage API.
+        It is never written to MongoDB or enterprise logs.
+        """
+
+        input_tokens = int(
+            usage.get(
+                "input_tokens",
+                0,
+            )
+            or 0
+        )
+
+        output_tokens = int(
+            usage.get(
+                "output_tokens",
+                0,
+            )
+            or 0
+        )
+
+        total_tokens = int(
+            usage.get(
+                "total_tokens",
+                input_tokens + output_tokens,
+            )
+            or (
+                input_tokens
+                + output_tokens
             )
         )
+
+        model_name = str(
+            usage.get(
+                "model",
+                "",
+            )
+            or ""
+        ).strip()
 
         payload = {
             "applicationName": "Evidence Summary",
             "sourceIds": source_ids,
             "runId": evidence_summary_id,
-            "userId": "",
+            "userId": user_id,
             "purpose": "Evidence Summary",
             "method": "ainvoke",
             "agentName": "Evidence Summary Agent",
             "usageType": "LLM",
-            "inputToken": usage.get(
-                "input_tokens",
-                0,
-            ),
-            "outputToken": usage.get(
-                "output_tokens",
-                0,
-            ),
-            "totalTokens": usage.get(
-                "total_tokens",
-                0,
-            ),
-            "model": usage.get(
-                "model",
-                "",
-            ),
+            "inputToken": input_tokens,
+            "outputToken": output_tokens,
+            "totalTokens": total_tokens,
+            "model": model_name,
             "duration": round(
-                duration,
+                float(duration or 0),
                 3,
             ),
+            # TokenUsageService calculates cost using the model
+            # pricing table when value is zero.
             "cost": {
                 "currency": "USD",
                 "value": 0,
             },
             "companyId": company_id,
             "tenderId": tender_id,
-            "projectId": "",
+            "projectId": project_id,
         }
+
+        print(
+            "Evidence Summary token logging state:",
+            {
+                "bearerTokenPresent": bool(
+                    bearer_token
+                ),
+                "bearerTokenLength": (
+                    len(bearer_token)
+                    if bearer_token
+                    else 0
+                ),
+                "companyId": company_id,
+                "tenderId": tender_id,
+                "projectId": project_id,
+                "userId": user_id,
+                "runId": evidence_summary_id,
+                "inputToken": input_tokens,
+                "outputToken": output_tokens,
+                "totalTokens": total_tokens,
+                "model": model_name,
+                "duration": payload[
+                    "duration"
+                ],
+                "sourceIdCount": len(
+                    source_ids
+                ),
+            },
+        )
 
         result = await TokenUsageService.log_usage(
             payload=payload,
             bearer_token=bearer_token,
         )
 
-        if not result.get("success", False):
+        if not result.get(
+            "success",
+            False,
+        ):
             print(
-                "Evidence Summary token usage logging failed:",
+                "Evidence Summary token usage "
+                "logging failed:",
                 result,
             )
+            return
+
+        print(
+            "Evidence Summary token usage "
+            "logged successfully:",
+            {
+                "runId": evidence_summary_id,
+                "model": model_name,
+                "totalTokens": total_tokens,
+            },
+        )
 
     async def process_requirement(
         self,
@@ -5152,17 +5416,47 @@ class RequirementEvidenceSummaryAgent:
                 ).strip()
             ]
 
-            await self.log_llm_token_usage(
-                response=llm_response,
-                bearer_token=bearer_token,
-                company_id=company_id,
-                tender_id=tender_id,
-                evidence_summary_id=(
-                    evidence_summary_id
-                ),
-                source_ids=source_ids,
-                duration=llm_duration,
+            llm_usage = (
+                TokenUsageService.extract_token_usage(
+                    llm_response
+                )
             )
+
+            token_usage_record = {
+                "input_tokens": int(
+                    llm_usage.get(
+                        "input_tokens",
+                        0,
+                    )
+                    or 0
+                ),
+                "output_tokens": int(
+                    llm_usage.get(
+                        "output_tokens",
+                        0,
+                    )
+                    or 0
+                ),
+                "total_tokens": int(
+                    llm_usage.get(
+                        "total_tokens",
+                        0,
+                    )
+                    or 0
+                ),
+                "model": str(
+                    llm_usage.get(
+                        "model",
+                        "",
+                    )
+                    or ""
+                ).strip(),
+                "duration": float(
+                    llm_duration
+                    or 0
+                ),
+                "source_ids": source_ids,
+            }
 
             confidence_value = (
                 parsed_result.get(
@@ -5264,6 +5558,9 @@ class RequirementEvidenceSummaryAgent:
                 "MissingEvidenceReason": (
                     missing_evidence_reason
                 ),
+                # Internal-only usage information. generate() removes
+                # this field before saving the EvidenceSummary item.
+                "_TokenUsage": token_usage_record,
             }
 
     def normalize_request_payload(
@@ -5518,6 +5815,228 @@ class RequirementEvidenceSummaryAgent:
 
                 raise
 
+            # ------------------------------------------------
+            # Aggregate Evidence Summary LLM usage for this run.
+            # One token-usage HTTP request is sent, matching the
+            # run-level logging behaviour used by Agent 1.
+            # ------------------------------------------------
+
+            token_usage_records: list[
+                Mapping[str, Any]
+            ] = []
+
+            for evidence_summary in (
+                evidence_summaries
+            ):
+                token_usage_record = (
+                    evidence_summary.pop(
+                        "_TokenUsage",
+                        None,
+                    )
+                )
+
+                if isinstance(
+                    token_usage_record,
+                    Mapping,
+                ):
+                    token_usage_records.append(
+                        token_usage_record
+                    )
+
+            if token_usage_records:
+                total_input_tokens = sum(
+                    int(
+                        record.get(
+                            "input_tokens",
+                            0,
+                        )
+                        or 0
+                    )
+                    for record in (
+                        token_usage_records
+                    )
+                )
+
+                total_output_tokens = sum(
+                    int(
+                        record.get(
+                            "output_tokens",
+                            0,
+                        )
+                        or 0
+                    )
+                    for record in (
+                        token_usage_records
+                    )
+                )
+
+                total_tokens = sum(
+                    int(
+                        record.get(
+                            "total_tokens",
+                            0,
+                        )
+                        or (
+                            int(
+                                record.get(
+                                    "input_tokens",
+                                    0,
+                                )
+                                or 0
+                            )
+                            + int(
+                                record.get(
+                                    "output_tokens",
+                                    0,
+                                )
+                                or 0
+                            )
+                        )
+                    )
+                    for record in (
+                        token_usage_records
+                    )
+                )
+
+                total_llm_duration = sum(
+                    float(
+                        record.get(
+                            "duration",
+                            0,
+                        )
+                        or 0
+                    )
+                    for record in (
+                        token_usage_records
+                    )
+                )
+
+                model_names = [
+                    str(
+                        record.get(
+                            "model",
+                            "",
+                        )
+                        or ""
+                    ).strip()
+                    for record in (
+                        token_usage_records
+                    )
+                    if str(
+                        record.get(
+                            "model",
+                            "",
+                        )
+                        or ""
+                    ).strip()
+                ]
+
+                model_name = (
+                    model_names[0]
+                    if model_names
+                    else str(
+                        os.getenv(
+                            "OPENAI_MODEL",
+                            "",
+                        )
+                        or os.getenv(
+                            "MISTRAL_MODEL",
+                            "",
+                        )
+                        or os.getenv(
+                            "GROQ_MODEL",
+                            "",
+                        )
+                        or ""
+                    ).strip()
+                )
+
+                unique_source_ids: list[str] = []
+                seen_source_ids: set[str] = set()
+
+                for record in token_usage_records:
+                    record_source_ids = (
+                        record.get(
+                            "source_ids",
+                            [],
+                        )
+                    )
+
+                    if not isinstance(
+                        record_source_ids,
+                        Sequence,
+                    ) or isinstance(
+                        record_source_ids,
+                        (
+                            str,
+                            bytes,
+                            bytearray,
+                        ),
+                    ):
+                        record_source_ids = [
+                            record_source_ids
+                        ]
+
+                    for source_id_value in (
+                        record_source_ids
+                    ):
+                        source_id = str(
+                            source_id_value
+                            or ""
+                        ).strip()
+
+                        if (
+                            not source_id
+                            or source_id
+                            in seen_source_ids
+                        ):
+                            continue
+
+                        seen_source_ids.add(
+                            source_id
+                        )
+                        unique_source_ids.append(
+                            source_id
+                        )
+
+                await self.log_llm_token_usage(
+                    usage={
+                        "input_tokens": (
+                            total_input_tokens
+                        ),
+                        "output_tokens": (
+                            total_output_tokens
+                        ),
+                        "total_tokens": (
+                            total_tokens
+                        ),
+                        "model": model_name,
+                    },
+                    bearer_token=(
+                        dynamic_bearer_token
+                    ),
+                    company_id=company_id,
+                    tender_id=tender_id,
+                    project_id=project_id,
+                    user_id=user_id,
+                    evidence_summary_id=(
+                        evidence_summary_id
+                    ),
+                    source_ids=(
+                        unique_source_ids
+                    ),
+                    duration=(
+                        total_llm_duration
+                    ),
+                )
+
+            else:
+                print(
+                    "Evidence Summary token logging "
+                    "skipped: no Evidence Summary LLM "
+                    "call was made."
+                )
+
             evidence_found_count = sum(
                 1
                 for evidence_summary in evidence_summaries
@@ -5716,4 +6235,3 @@ class RequirementEvidenceSummaryAgent:
 
 EvidenceSummaryAgent = RequirementEvidenceSummaryAgent
 Agent = RequirementEvidenceSummaryAgent
-
