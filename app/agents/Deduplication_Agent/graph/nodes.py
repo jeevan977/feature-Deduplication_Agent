@@ -4,6 +4,7 @@
 
 # import asyncio
 # import logging
+# import time
 # from typing import Any
 
 # from app.infrastructure.token_usage import (
@@ -69,9 +70,11 @@
 #         "invoke() or ainvoke()."
 #     )
 
+
 # async def log_llm_token_usage(
 #     response: Any,
 #     state: DeduplicationState,
+#     duration: float,
 # ) -> None:
 #     """
 #     Extract token usage and send the complete
@@ -202,9 +205,9 @@
 #             "",
 #         ),
 
-#         "duration": context.get(
-#             "duration",
-#             0,
+#         "duration": round(
+#             duration,
+#             3,
 #         ),
 
 #         "cost": {
@@ -247,6 +250,10 @@
 #             "companyId": company_id,
 #             "tenderId": tender_id,
 #             "runId": deduplication_id,
+#             "duration": round(
+#                 duration,
+#                 3,
+#             ),
 #             "usage": usage,
 #         },
 #     )
@@ -265,6 +272,7 @@
 #             result,
 #         )
 
+
 # async def deduplicate_requirements_node(
 #     state: DeduplicationState,
 #     llm: Any,
@@ -280,19 +288,27 @@
 #             "Deduplication prompt is missing."
 #         )
 
+#     agent_start_time = time.perf_counter()
+
 #     llm_response = await invoke_llm(
 #         llm=llm,
 #         prompt=prompt,
 #     )
 
-#     # Log usage immediately after the LLM response.
+#     parsed_result = parse_llm_response(
+#         llm_response
+#     )
+
+#     agent_duration = (
+#         time.perf_counter()
+#         - agent_start_time
+#     )
+
+#     # Log the actual LLM agent execution duration.
 #     await log_llm_token_usage(
 #         response=llm_response,
 #         state=state,
-#     )
-
-#     parsed_result = parse_llm_response(
-#         llm_response
+#         duration=agent_duration,
 #     )
 
 #     return {
@@ -327,6 +343,8 @@
 
 
 
+
+
 from __future__ import annotations
 
 import asyncio
@@ -341,7 +359,7 @@ from app.infrastructure.token_usage import (
 from app.agents.Deduplication_Agent.graph.agent_state import (
     DeduplicationState,
 )
-from app.agents.Deduplication_Agent.utils.helper import (
+from app.utils.helpers import (
     build_deduplication_prompt,
     parse_llm_response,
     validate_deduplication_result,
