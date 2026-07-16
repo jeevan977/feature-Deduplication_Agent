@@ -1,4 +1,5 @@
 ﻿
+
 from __future__ import annotations
 
 import asyncio
@@ -159,30 +160,35 @@ class RequirementDeduplicationAgent:
                 )
             )
 
+            summary = result.get(
+                "Summary",
+                {},
+            )
+
+            if not isinstance(summary, Mapping):
+                summary = {}
+
             completed_payload = {
                 **common_payload,
-                "canonicalRequirementCount": (
-                    result.get(
-                        "CanonicalRequirementCount",
-                        len(
-                            result.get(
-                                "CanonicalRequirements",
-                                [],
-                            )
-                        ),
+                "totalInputRequirements": (
+                    summary.get(
+                        "TotalInputRequirements",
+                        requirement_count,
                     )
                 ),
-                "duplicateRequirementCount": (
-                    result.get(
-                        "DuplicateRequirementCount",
+                "totalDeduplicatedRequirements": (
+                    summary.get(
+                        "TotalDeduplicatedRequirements",
                         0,
                     )
                 ),
-                "deduplicationStatus": (
-                    result.get(
-                        "DeduplicationStatus"
+                "duplicatesRemoved": (
+                    summary.get(
+                        "DuplicatesRemoved",
+                        0,
                     )
                 ),
+                "deduplicationStatus": "Completed",
             }
 
             await asyncio.to_thread(
@@ -201,38 +207,12 @@ class RequirementDeduplicationAgent:
 
             return result
 
-        # except Exception as exc:
-        #     failed_payload = {
-        #         **common_payload,
-        #         "error": str(exc),
-        #         "errorType": type(exc).__name__,
-        #     }
-
         except Exception as exc:
-            print(
-                "Requirement Deduplication Agent failed:",
-                {
-                    "errorType": type(exc).__name__,
-                    "message": str(exc),
-                    "statusCode": getattr(
-                        exc,
-                        "status_code",
-                        None,
-                    ),
-                    "errorCode": getattr(
-                        exc,
-                        "code",
-                        None,
-                    ),
-                },
-            )
-
             failed_payload = {
                 **common_payload,
                 "error": str(exc),
                 "errorType": type(exc).__name__,
             }
-
 
             await asyncio.to_thread(
                 self._logger.end,

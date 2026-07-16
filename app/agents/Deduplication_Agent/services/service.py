@@ -1,9 +1,8 @@
 
 
+
 from __future__ import annotations
 from bson import ObjectId
-from fastapi.encoders import jsonable_encoder
-from fastapi.responses import JSONResponse
 import asyncio
 import json
 from datetime import datetime, timezone
@@ -292,34 +291,6 @@ def remove_exact_duplicates(
         result.append(requirement)
 
     return result
-
-
-def prepare_document_for_copy(
-    source_document: Mapping[str, Any],
-) -> dict[str, Any]:
-    """
-    Prepare a source document for copying into the
-    deduplication destination document.
-
-    The source _id is renamed because the destination
-    record has its own _id.
-    """
-
-    copied_document = dict(source_document)
-
-    source_id = copied_document.pop(
-        "_id",
-        None,
-    )
-
-    return {
-        "SourceMongoId": (
-            str(source_id)
-            if source_id is not None
-            else None
-        ),
-        "Document": copied_document,
-    }
 
 
 class RequirementDeduplicationService:
@@ -612,27 +583,8 @@ class RequirementDeduplicationService:
         )
 
         raw_requirements: list[Any] = []
-        source_document_ids: list[str] = []
-        copied_source_documents: list[
-            dict[str, Any]
-        ] = []
 
         for source_document in source_documents:
-            source_id = source_document.get(
-                "_id"
-            )
-
-            if source_id is not None:
-                source_document_ids.append(
-                    str(source_id)
-                )
-
-            copied_source_documents.append(
-                prepare_document_for_copy(
-                    source_document
-                )
-            )
-
             requirements = (
                 extract_requirements_from_document(
                     source_document
@@ -691,35 +643,21 @@ class RequirementDeduplicationService:
         destination_document = {
             "CompanyId": company_id,
             "TenderId": tender_id,
-
             "IsRegenerate": is_regenerate,
             "UserId": user_id,
             "UserName": user_name,
             "ProjectId": project_id,
-
-            "SourceCollection": (
-                self.source_collection.name
-            ),
-            "SourceDocumentIds": (
-                source_document_ids
-            ),
-            "SourceDocumentCount": len(
-                source_documents
-            ),
-            "CopiedSourceDocuments": (
-                copied_source_documents
-            ),
-            "Input": {
-                "RawRequirements": (
+            "Summary": {
+                "TotalInputRequirements": len(
                     raw_requirements
                 ),
-                "RawRequirementCount": len(
-                    raw_requirements
-                ),
+                "TotalDeduplicatedRequirements": 0,
+                "DuplicatesRemoved": 0,
             },
-            "Output": None,
+            "Output": {
+                "DeduplicatedRequirements": []
+            },
             "Status": "Processing",
-            "IsActive": True,
             "Error": None,
             "CreatedAt": created_at,
             "UpdatedAt": created_at,
@@ -757,24 +695,13 @@ class RequirementDeduplicationService:
             context = {
                 "CompanyId": company_id,
                 "TenderId": tender_id,
-
                 "IsRegenerate": is_regenerate,
                 "IsRegenerated": is_regenerate,
-
                 "UserId": user_id,
                 "UserName": user_name,
                 "ProjectId": project_id,
-
                 "DeduplicationId": str(
                     deduplication_id
-                ),
-
-                "SourceCollection": (
-                    self.source_collection.name
-                ),
-
-                "SourceDocumentIds": (
-                    source_document_ids
                 ),
             }
 
@@ -791,10 +718,42 @@ class RequirementDeduplicationService:
                 ),
             )
 
+            summary = result.get(
+                "Summary",
+                {},
+            )
+
+            deduplicated_requirements = (
+                result.get(
+                    "DeduplicatedRequirements",
+                    [],
+                )
+            )
+
+            if not isinstance(summary, Mapping):
+                raise ValueError(
+                    "Agent 1 returned an invalid Summary."
+                )
+
+            if not isinstance(
+                deduplicated_requirements,
+                list,
+            ):
+                raise ValueError(
+                    "Agent 1 returned an invalid "
+                    "DeduplicatedRequirements list."
+                )
+
+            compact_output = {
+                "DeduplicatedRequirements": (
+                    deduplicated_requirements
+                )
+            }
+
             completed_at = utc_now()
 
             # ------------------------------------------
-            # Save LLM output in destination Mongo
+            # Save only the approved compact output.
             # ------------------------------------------
 
             await asyncio.to_thread(
@@ -804,7 +763,8 @@ class RequirementDeduplicationService:
                 },
                 {
                     "$set": {
-                        "Output": result,
+                        "Summary": dict(summary),
+                        "Output": compact_output,
                         "Status": "IsRegenerated",
                         "Error": None,
                         "UpdatedAt": completed_at,
@@ -818,7 +778,10 @@ class RequirementDeduplicationService:
                     deduplication_id
                 ),
                 "Status": "Completed",
-                "Result": result,
+                "Result": {
+                    "Summary": dict(summary),
+                    "Output": compact_output,
+                },
             }
 
         except Exception as exc:
