@@ -1,7 +1,6 @@
 
 
 
-
 # from __future__ import annotations
 
 # import asyncio
@@ -2145,14 +2144,24 @@
 #         evidence_summary_id: str,
 #         source_ids: list[str],
 #         duration: float,
+#         llm_invocation_count: int,
 #     ) -> None:
 #         """
-#         Send one aggregated token-usage log for the complete
-#         Evidence Summary Agent run.
+#         Send exactly one aggregated token-usage record for the
+#         complete Evidence Summary Agent run.
 
 #         The bearer token is used only for the token-usage API.
-#         It is never written to MongoDB or enterprise logs.
+#         It is never saved in MongoDB or enterprise logs.
 #         """
+
+#         normalized_user_id = str(
+#             user_id or ""
+#         ).strip()
+
+#         if not normalized_user_id:
+#             raise ValueError(
+#                 "UserId is required for Agent 2 token-usage logging."
+#             )
 
 #         input_tokens = int(
 #             usage.get(
@@ -2173,27 +2182,51 @@
 #         total_tokens = int(
 #             usage.get(
 #                 "total_tokens",
-#                 input_tokens + output_tokens,
+#                 0,
 #             )
-#             or (
+#             or 0
+#         )
+
+#         if total_tokens <= 0:
+#             total_tokens = (
 #                 input_tokens
 #                 + output_tokens
 #             )
-#         )
 
 #         model_name = str(
 #             usage.get(
 #                 "model",
 #                 "",
 #             )
+#             or TokenUsageService
+#             .resolve_configured_model_name()
 #             or ""
 #         ).strip()
 
-#         payload = {
+#         unique_source_ids: list[str] = []
+#         seen_source_ids: set[str] = set()
+
+#         for source_id_value in source_ids:
+#             source_id = str(
+#                 source_id_value or ""
+#             ).strip()
+
+#             if (
+#                 not source_id
+#                 or source_id in seen_source_ids
+#             ):
+#                 continue
+
+#             seen_source_ids.add(source_id)
+#             unique_source_ids.append(source_id)
+
+#         raw_payload = {
 #             "applicationName": "Evidence Summary",
-#             "sourceIds": source_ids,
-#             "runId": evidence_summary_id,
-#             "userId": user_id,
+#             "sourceIds": unique_source_ids,
+#             "runId": str(
+#                 evidence_summary_id
+#             ),
+#             "userId": normalized_user_id,
 #             "purpose": "Evidence Summary",
 #             "method": "ainvoke",
 #             "agentName": "Evidence Summary Agent",
@@ -2206,16 +2239,43 @@
 #                 float(duration or 0),
 #                 3,
 #             ),
-#             # TokenUsageService calculates cost using the model
-#             # pricing table when value is zero.
 #             "cost": {
 #                 "currency": "USD",
 #                 "value": 0,
 #             },
-#             "companyId": company_id,
-#             "tenderId": tender_id,
-#             "projectId": project_id,
+#             "companyId": str(
+#                 company_id or ""
+#             ),
+#             "tenderId": str(
+#                 tender_id or ""
+#             ),
+#             "projectId": str(
+#                 project_id or ""
+#             ),
 #         }
+
+#         # Use the same central model-pricing logic as Agent 1.
+#         request_payload = (
+#             TokenUsageService.build_request_payload(
+#                 raw_payload
+#             )
+#         )
+
+#         cost_data = request_payload.get(
+#             "cost",
+#             {
+#                 "currency": "USD",
+#                 "value": 0.0,
+#             },
+#         )
+
+#         cost_value = float(
+#             cost_data.get(
+#                 "value",
+#                 0,
+#             )
+#             or 0
+#         )
 
 #         print(
 #             "Evidence Summary token logging state:",
@@ -2228,26 +2288,64 @@
 #                     if bearer_token
 #                     else 0
 #                 ),
-#                 "companyId": company_id,
-#                 "tenderId": tender_id,
-#                 "projectId": project_id,
-#                 "userId": user_id,
-#                 "runId": evidence_summary_id,
-#                 "inputToken": input_tokens,
-#                 "outputToken": output_tokens,
-#                 "totalTokens": total_tokens,
-#                 "model": model_name,
-#                 "duration": payload[
-#                     "duration"
-#                 ],
+#                 "companyId": request_payload.get(
+#                     "companyId",
+#                     "",
+#                 ),
+#                 "tenderId": request_payload.get(
+#                     "tenderId",
+#                     "",
+#                 ),
+#                 "projectId": request_payload.get(
+#                     "projectId",
+#                     "",
+#                 ),
+#                 "userId": request_payload.get(
+#                     "userId",
+#                     "",
+#                 ),
+#                 "runId": request_payload.get(
+#                     "runId",
+#                     "",
+#                 ),
+#                 "duration": request_payload.get(
+#                     "duration",
+#                     0,
+#                 ),
+#                 "llmInvocationCount": int(
+#                     llm_invocation_count
+#                 ),
 #                 "sourceIdCount": len(
-#                     source_ids
+#                     unique_source_ids
+#                 ),
+#                 "usage": {
+#                     "input_tokens": request_payload.get(
+#                         "inputToken",
+#                         0,
+#                     ),
+#                     "output_tokens": request_payload.get(
+#                         "outputToken",
+#                         0,
+#                     ),
+#                     "total_tokens": request_payload.get(
+#                         "totalTokens",
+#                         0,
+#                     ),
+#                     "model": request_payload.get(
+#                         "model",
+#                         model_name,
+#                     ),
+#                 },
+#                 "cost": cost_data,
+#                 "formattedCost": format(
+#                     cost_value,
+#                     ".6f",
 #                 ),
 #             },
 #         )
 
 #         result = await TokenUsageService.log_usage(
-#             payload=payload,
+#             payload=request_payload,
 #             bearer_token=bearer_token,
 #         )
 
@@ -2266,9 +2364,31 @@
 #             "Evidence Summary token usage "
 #             "logged successfully:",
 #             {
-#                 "runId": evidence_summary_id,
-#                 "model": model_name,
-#                 "totalTokens": total_tokens,
+#                 "runId": request_payload.get(
+#                     "runId",
+#                     "",
+#                 ),
+#                 "model": request_payload.get(
+#                     "model",
+#                     model_name,
+#                 ),
+#                 "inputToken": request_payload.get(
+#                     "inputToken",
+#                     0,
+#                 ),
+#                 "outputToken": request_payload.get(
+#                     "outputToken",
+#                     0,
+#                 ),
+#                 "totalTokens": request_payload.get(
+#                     "totalTokens",
+#                     0,
+#                 ),
+#                 "duration": request_payload.get(
+#                     "duration",
+#                     0,
+#                 ),
+#                 "cost": cost_data,
 #             },
 #         )
 
@@ -2636,6 +2756,8 @@
 #     ) -> dict[str, Any]:
 #         del config
 
+#         agent_run_start_time = time.perf_counter()
+
 #         payload = self.normalize_request_payload(
 #             input_data
 #         )
@@ -2711,6 +2833,37 @@
 #                 tender_id=tender_id,
 #             )
 #         )
+
+#         # The API request is the primary source for runtime identity.
+#         # MongoDB is only a fallback for older standalone Agent 2 calls.
+#         if not user_id:
+#             user_id = str(
+#                 source_document.get("UserId")
+#                 or source_document.get("userId")
+#                 or source_document.get("user_id")
+#                 or ""
+#             ).strip()
+
+#         if not user_name:
+#             user_name = str(
+#                 source_document.get("UserName")
+#                 or source_document.get("userName")
+#                 or source_document.get("user_name")
+#                 or ""
+#             ).strip()
+
+#         if not project_id:
+#             project_id = str(
+#                 source_document.get("ProjectId")
+#                 or source_document.get("projectId")
+#                 or source_document.get("project_id")
+#                 or ""
+#             ).strip()
+
+#         if not user_id:
+#             raise ValueError(
+#                 "UserId is required for Agent 2 token-usage logging."
+#             )
 
 #         deduplicated_requirements = (
 #             extract_deduplicated_requirements(
@@ -2862,6 +3015,11 @@
 
 #                 raise
 
+#             agent_run_duration = (
+#                 time.perf_counter()
+#                 - agent_run_start_time
+#             )
+
 #             # ------------------------------------------------
 #             # Aggregate Evidence Summary LLM usage for this run.
 #             # One token-usage HTTP request is sent, matching the
@@ -2939,19 +3097,6 @@
 #                                 or 0
 #                             )
 #                         )
-#                     )
-#                     for record in (
-#                         token_usage_records
-#                     )
-#                 )
-
-#                 total_llm_duration = sum(
-#                     float(
-#                         record.get(
-#                             "duration",
-#                             0,
-#                         )
-#                         or 0
 #                     )
 #                     for record in (
 #                         token_usage_records
@@ -3073,7 +3218,10 @@
 #                         unique_source_ids
 #                     ),
 #                     duration=(
-#                         total_llm_duration
+#                         agent_run_duration
+#                     ),
+#                     llm_invocation_count=len(
+#                         token_usage_records
 #                     ),
 #                 )
 
@@ -3103,7 +3251,10 @@
 #                         evidence_summary_id
 #                     ),
 #                     source_ids=[],
-#                     duration=0.0,
+#                     duration=(
+#                         agent_run_duration
+#                     ),
+#                     llm_invocation_count=0,
 #                 )
 
 #                 print(
@@ -3313,7 +3464,6 @@
 
 
 
-
 from __future__ import annotations
 
 import asyncio
@@ -3321,6 +3471,8 @@ import json
 import os
 import time
 from datetime import datetime, timezone
+from functools import lru_cache
+from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence
 
 from bson import ObjectId
@@ -3335,6 +3487,166 @@ from app.infrastructure.load_llms import (
 )
 from app.infrastructure.logger import Logging
 from app.infrastructure.token_usage import TokenUsageService
+
+
+EVIDENCE_AGENT_DIRECTORY = Path(__file__).resolve().parent
+EVIDENCE_CONSTITUTION_PATH = (
+    EVIDENCE_AGENT_DIRECTORY
+    / "input_files"
+    / "Evidence_Summary_Constitution.md"
+)
+EVIDENCE_SPECIFICATION_PATH = (
+    EVIDENCE_AGENT_DIRECTORY
+    / "input_files"
+    / "Evidence_Summary_Specification.md"
+)
+
+
+@lru_cache(maxsize=4)
+def read_required_instruction_file(
+    file_path: str,
+) -> str:
+    """Read and cache one required Agent 2 instruction file."""
+
+    resolved_path = Path(file_path).resolve()
+
+    if not resolved_path.is_file():
+        raise FileNotFoundError(
+            "Required Evidence Summary instruction file was not found: "
+            f"{resolved_path}"
+        )
+
+    content = resolved_path.read_text(
+        encoding="utf-8"
+    ).strip()
+
+    if not content:
+        raise ValueError(
+            "Required Evidence Summary instruction file is empty: "
+            f"{resolved_path}"
+        )
+
+    return content
+
+
+@lru_cache(maxsize=1)
+def load_evidence_summary_instructions() -> tuple[str, str]:
+    """Load Agent 2 constitution and specification once per process."""
+
+    constitution = read_required_instruction_file(
+        str(EVIDENCE_CONSTITUTION_PATH)
+    )
+    specification = read_required_instruction_file(
+        str(EVIDENCE_SPECIFICATION_PATH)
+    )
+
+    print(
+        "Evidence Summary instruction files loaded:",
+        {
+            "constitutionPath": str(
+                EVIDENCE_CONSTITUTION_PATH
+            ),
+            "specificationPath": str(
+                EVIDENCE_SPECIFICATION_PATH
+            ),
+            "constitutionCharacters": len(
+                constitution
+            ),
+            "specificationCharacters": len(
+                specification
+            ),
+        },
+    )
+
+    return constitution, specification
+
+
+def deduplicate_evidence_sources(
+    evidence_sources: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Remove repeated Qdrant chunks before the Evidence LLM call."""
+
+    unique_sources: list[dict[str, Any]] = []
+    seen_texts: set[str] = set()
+    seen_ids: set[str] = set()
+
+    for evidence_source in evidence_sources:
+        evidence_id = str(
+            evidence_source.get("EvidenceId", "")
+            or ""
+        ).strip()
+        evidence_text = " ".join(
+            str(
+                evidence_source.get("EvidenceText", "")
+                or ""
+            ).split()
+        ).casefold()
+
+        if evidence_text:
+            duplicate_key = f"text:{evidence_text}"
+        elif evidence_id:
+            duplicate_key = f"id:{evidence_id}"
+        else:
+            continue
+
+        if duplicate_key in seen_texts:
+            continue
+
+        if evidence_id and evidence_id in seen_ids:
+            continue
+
+        seen_texts.add(duplicate_key)
+
+        if evidence_id:
+            seen_ids.add(evidence_id)
+
+        unique_sources.append(
+            dict(evidence_source)
+        )
+
+    if len(unique_sources) != len(evidence_sources):
+        print(
+            "Duplicate Qdrant evidence removed:",
+            {
+                "retrievedCount": len(evidence_sources),
+                "uniqueCount": len(unique_sources),
+                "duplicatesRemoved": (
+                    len(evidence_sources)
+                    - len(unique_sources)
+                ),
+            },
+        )
+
+    return unique_sources
+
+
+def contains_prohibited_inference_language(
+    *values: str,
+) -> bool:
+    """Reject positive decisions that explicitly rely on inference."""
+
+    combined_text = " ".join(
+        str(value or "").casefold()
+        for value in values
+    )
+
+    prohibited_phrases = (
+        "implies",
+        "suggests",
+        "suggesting",
+        "indicates a commitment",
+        "indicating a commitment",
+        "broadly supports",
+        "appears to support",
+        "likely demonstrates",
+        "could mean",
+        "generally aligns",
+    )
+
+    return any(
+        phrase in combined_text
+        for phrase in prohibited_phrases
+    )
 
 
 def utc_now() -> datetime:
@@ -4002,105 +4314,54 @@ def build_evidence_summary_prompt(
     evidence_sources: list[dict[str, Any]],
 ) -> str:
     """
-    Build the LLM prompt for one deduplicated requirement.
-
-    The LLM receives only the selected Qdrant evidence chunks and
-    returns the compact evidence decision fields required by MongoDB.
+    Build one Agent 2 prompt from the external Constitution and
+    Specification files plus the current requirement and evidence.
     """
 
-    evidence_blocks: list[str] = []
-
-    for evidence_index, evidence_source in enumerate(
-        evidence_sources,
-        start=1,
-    ):
-        evidence_blocks.append(
-            "\n".join(
-                [
-                    f"[Evidence {evidence_index}]",
-                    (
-                        "EvidenceId: "
-                        f"{evidence_source.get('EvidenceId', '')}"
-                    ),
-                    (
-                        "ChunkId: "
-                        f"{evidence_source.get('ChunkId', '')}"
-                    ),
-                    (
-                        "SourceTitle: "
-                        f"{evidence_source.get('SourceTitle', '')}"
-                    ),
-                    (
-                        "SourceDocument: "
-                        f"{evidence_source.get('SourceDocument', '')}"
-                    ),
-                    (
-                        "DocumentType: "
-                        f"{evidence_source.get('DocumentType', '')}"
-                    ),
-                    (
-                        "RelatedSection: "
-                        f"{evidence_source.get('RelatedSection', '')}"
-                    ),
-                    (
-                        "EvidenceScore: "
-                        f"{evidence_source.get('EvidenceScore', 0)}"
-                    ),
-                    "EvidenceText:",
-                    str(
-                        evidence_source.get(
-                            "EvidenceText",
-                            "",
-                        )
-                    ),
-                ]
-            )
-        )
-
-    evidence_text = "\n\n".join(
-        evidence_blocks
+    constitution, specification = (
+        load_evidence_summary_instructions()
     )
 
-    return f"""
-You are the Evidence Summary Agent for a tender-response system.
+    runtime_input = {
+        "CanonicalRequirement": canonical_requirement,
+        "IntentResult": {
+            "CapabilityIntent": normalize_string_list(
+                intent_values.get("CapabilityIntent")
+            ),
+            "EvidenceSections": normalize_string_list(
+                intent_values.get("EvidenceSections")
+            ),
+            "SemanticAnchors": normalize_string_list(
+                intent_values.get("SemanticAnchors")
+            ),
+        },
+        "RetrievedCompanyEvidence": evidence_sources,
+    }
 
-Evaluate whether the retrieved company evidence supports the tender requirement.
-
-STRICT RULES:
-1. Use only the supplied evidence chunks.
-2. Do not invent clients, projects, certifications, figures, dates, technologies, outcomes or capabilities.
-3. EvidenceFound must be true only when the supplied chunks materially support the requirement.
-4. EvidenceReason must briefly explain why the evidence supports or does not support the requirement.
-5. EvidenceSummary must be concise and grounded only in the supplied evidence.
-6. MissingEvidenceReason must be null when EvidenceFound is true.
-7. When EvidenceFound is false, EvidenceSummary must be an empty string and MissingEvidenceReason must clearly state what evidence is missing.
-8. EvidenceConfidence must be a number between 0 and 1.
-9. Return valid JSON only. Do not return markdown or code fences.
-
-TENDER REQUIREMENT:
-{canonical_requirement}
-
-CAPABILITY INTENT:
-{json.dumps(intent_values.get('CapabilityIntent', []), ensure_ascii=False)}
-
-EXPECTED EVIDENCE SECTIONS:
-{json.dumps(intent_values.get('EvidenceSections', []), ensure_ascii=False)}
-
-SEMANTIC ANCHORS:
-{json.dumps(intent_values.get('SemanticAnchors', []), ensure_ascii=False)}
-
-RETRIEVED COMPANY EVIDENCE:
-{evidence_text}
-
-Return exactly this JSON structure:
-{{
-  "EvidenceFound": true,
-  "EvidenceReason": "Why the supplied evidence does or does not support the requirement.",
-  "EvidenceSummary": "Concise evidence summary grounded only in the supplied chunks.",
-  "EvidenceConfidence": 0.0,
-  "MissingEvidenceReason": null
-}}
-""".strip()
+    return "\n\n".join(
+        [
+            "EVIDENCE SUMMARY CONSTITUTION FILE:\n"
+            + constitution,
+            "EVIDENCE SUMMARY SPECIFICATION FILE:\n"
+            + specification,
+            (
+                "RUNTIME TASK:\n"
+                "Evaluate the complete tender requirement against "
+                "only the supplied company evidence. Follow the "
+                "Constitution and Specification exactly. Return "
+                "strict JSON only. Do not return markdown or "
+                "reasoning."
+            ),
+            (
+                "RUNTIME INPUT JSON:\n"
+                + json.dumps(
+                    runtime_input,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                )
+            ),
+        ]
+    ).strip()
 
 
 class RequirementEvidenceSummaryAgent:
@@ -5718,11 +5979,11 @@ class RequirementEvidenceSummaryAgent:
         semaphore: asyncio.Semaphore,
     ) -> dict[str, Any]:
         """
-        Generate exactly one evidence-summary item for one Agent 1
-        deduplicated requirement.
-
-        A result is returned even when Qdrant finds no evidence.
+        Generate exactly one validated evidence-summary item for one
+        Agent 1 deduplicated requirement.
         """
+
+        del tender_id, evidence_summary_id, bearer_token
 
         async with semaphore:
             canonical_requirement = str(
@@ -5811,9 +6072,11 @@ class RequirementEvidenceSummaryAgent:
                 search_query=search_query,
             )
 
-            evidence_sources = (
-                self.normalize_qdrant_results(
-                    qdrant_points
+            retrieved_evidence_sources = (
+                deduplicate_evidence_sources(
+                    self.normalize_qdrant_results(
+                        qdrant_points
+                    )
                 )
             )
 
@@ -5824,23 +6087,18 @@ class RequirementEvidenceSummaryAgent:
                 "DeduplicatedRequirementId": (
                     deduplicated_requirement_id
                 ),
-                "RequirementIds": (
-                    requirement_ids
-                ),
+                "RequirementIds": requirement_ids,
                 "CanonicalRequirement": (
                     canonical_requirement
                 ),
-                "RequirementType": (
-                    requirement_type
-                ),
+                "RequirementType": requirement_type,
                 "IntentResult": intent_result,
-                "EvidenceSources": evidence_sources,
+                # Only validated LLM-selected sources are saved here.
+                "EvidenceSources": [],
                 "Status": item_status,
             }
 
-            # Every requirement receives an output item. When Qdrant
-            # returns nothing, no LLM call is made.
-            if not evidence_sources:
+            if not retrieved_evidence_sources:
                 return {
                     **base_output,
                     "EvidenceFound": False,
@@ -5862,15 +6120,15 @@ class RequirementEvidenceSummaryAgent:
                     canonical_requirement
                 ),
                 intent_values=intent_values,
-                evidence_sources=evidence_sources,
+                evidence_sources=(
+                    retrieved_evidence_sources
+                ),
             )
 
             llm_start_time = time.perf_counter()
-
             llm_response = await self.invoke_llm(
                 prompt
             )
-
             llm_duration = (
                 time.perf_counter()
                 - llm_start_time
@@ -5880,21 +6138,16 @@ class RequirementEvidenceSummaryAgent:
                 llm_response
             )
 
-            source_ids = [
-                str(
+            all_retrieved_source_ids = normalize_string_list(
+                [
                     evidence_source.get(
                         "EvidenceId",
                         "",
                     )
-                )
-                for evidence_source in evidence_sources
-                if str(
-                    evidence_source.get(
-                        "EvidenceId",
-                        "",
-                    )
-                ).strip()
-            ]
+                    for evidence_source
+                    in retrieved_evidence_sources
+                ]
+            )
 
             llm_usage = (
                 TokenUsageService.extract_token_usage(
@@ -5932,37 +6185,13 @@ class RequirementEvidenceSummaryAgent:
                     or ""
                 ).strip(),
                 "duration": float(
-                    llm_duration
-                    or 0
+                    llm_duration or 0
                 ),
-                "source_ids": source_ids,
+                # These are the sources supplied to the LLM.
+                "source_ids": (
+                    all_retrieved_source_ids
+                ),
             }
-
-            confidence_value = (
-                parsed_result.get(
-                    "EvidenceConfidence",
-                    parsed_result.get(
-                        "Confidence",
-                        0,
-                    ),
-                )
-            )
-
-            try:
-                evidence_confidence = float(
-                    confidence_value or 0
-                )
-
-            except (TypeError, ValueError):
-                evidence_confidence = 0.0
-
-            evidence_confidence = max(
-                0.0,
-                min(
-                    1.0,
-                    evidence_confidence,
-                ),
-            )
 
             evidence_found = normalize_boolean(
                 parsed_result.get(
@@ -5987,47 +6216,152 @@ class RequirementEvidenceSummaryAgent:
                 or ""
             ).strip()
 
-            missing_evidence_reason_value = (
+            missing_evidence_reason = str(
                 parsed_result.get(
-                    "MissingEvidenceReason"
+                    "MissingEvidenceReason",
+                    "",
+                )
+                or ""
+            ).strip()
+
+            try:
+                evidence_confidence = float(
+                    parsed_result.get(
+                        "EvidenceConfidence",
+                        0,
+                    )
+                    or 0
+                )
+            except (TypeError, ValueError):
+                evidence_confidence = 0.0
+
+            evidence_confidence = max(
+                0.0,
+                min(1.0, evidence_confidence),
+            )
+
+            supporting_evidence_ids = (
+                normalize_string_list(
+                    parsed_result.get(
+                        "SupportingEvidenceIds",
+                        [],
+                    )
                 )
             )
 
-            missing_evidence_reason = (
+            evidence_by_id = {
                 str(
-                    missing_evidence_reason_value
+                    evidence_source.get(
+                        "EvidenceId",
+                        "",
+                    )
+                    or ""
+                ).strip(): evidence_source
+                for evidence_source
+                in retrieved_evidence_sources
+                if str(
+                    evidence_source.get(
+                        "EvidenceId",
+                        "",
+                    )
                     or ""
                 ).strip()
-            )
+            }
 
-            if evidence_found:
+            unknown_supporting_ids = [
+                evidence_id
+                for evidence_id
+                in supporting_evidence_ids
+                if evidence_id not in evidence_by_id
+            ]
+
+            selected_evidence_sources = [
+                dict(evidence_by_id[evidence_id])
+                for evidence_id
+                in supporting_evidence_ids
+                if evidence_id in evidence_by_id
+            ]
+
+            invalid_positive_reasons: list[str] = []
+
+            if evidence_found and unknown_supporting_ids:
+                invalid_positive_reasons.append(
+                    "The LLM returned unknown SupportingEvidenceIds."
+                )
+
+            if evidence_found and not selected_evidence_sources:
+                invalid_positive_reasons.append(
+                    "No valid supporting evidence source was selected."
+                )
+
+            if evidence_found and not evidence_summary:
+                invalid_positive_reasons.append(
+                    "EvidenceSummary was empty for a positive decision."
+                )
+
+            if evidence_found and (
+                contains_prohibited_inference_language(
+                    evidence_reason,
+                    evidence_summary,
+                )
+            ):
+                invalid_positive_reasons.append(
+                    "The positive decision relied on prohibited "
+                    "inference language rather than direct evidence."
+                )
+
+            if invalid_positive_reasons:
+                evidence_found = False
+                selected_evidence_sources = []
+                supporting_evidence_ids = []
+                evidence_summary = ""
+                evidence_confidence = 0.0
+                evidence_reason = " ".join(
+                    invalid_positive_reasons
+                )
+
+                if not missing_evidence_reason:
+                    missing_evidence_reason = (
+                        "Direct, specific and verifiable company "
+                        "evidence supporting the complete "
+                        "requirement is missing."
+                    )
+
+            elif evidence_found:
                 missing_evidence_reason = None
 
                 if not evidence_reason:
                     evidence_reason = (
-                        "The retrieved company evidence "
-                        "materially supports the requirement."
+                        "The selected company evidence directly "
+                        "supports the complete requirement."
                     )
 
             else:
+                selected_evidence_sources = []
+                supporting_evidence_ids = []
                 evidence_summary = ""
                 evidence_confidence = 0.0
 
                 if not evidence_reason:
                     evidence_reason = (
                         "The retrieved chunks do not provide "
-                        "sufficient support for the requirement."
+                        "direct and complete support for the "
+                        "requirement."
                     )
 
                 if not missing_evidence_reason:
                     missing_evidence_reason = (
-                        "The retrieved evidence does not "
-                        "sufficiently demonstrate the required "
-                        "capability, compliance or experience."
+                        "A direct policy, process, certification, "
+                        "control, commitment, methodology or "
+                        "verifiable record supporting the "
+                        "requirement is missing."
                     )
 
             return {
                 **base_output,
+                "EvidenceSources": (
+                    selected_evidence_sources
+                ),
                 "EvidenceFound": evidence_found,
                 "EvidenceReason": evidence_reason,
                 "EvidenceSummary": evidence_summary,
@@ -6038,8 +6372,6 @@ class RequirementEvidenceSummaryAgent:
                 "MissingEvidenceReason": (
                     missing_evidence_reason
                 ),
-                # Internal-only usage information. generate() removes
-                # this field before saving the EvidenceSummary item.
                 "_TokenUsage": token_usage_record,
             }
 
