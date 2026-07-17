@@ -1,4 +1,7 @@
 
+
+
+
 # from __future__ import annotations
 
 # import asyncio
@@ -3075,10 +3078,38 @@
 #                 )
 
 #             else:
+#                 # No Qdrant evidence means the Evidence Summary LLM
+#                 # was not called. Still create one run-level usage
+#                 # record with zero tokens so the Evidence Agent run
+#                 # remains visible in the central token log.
+#                 await self.log_llm_token_usage(
+#                     usage={
+#                         "input_tokens": 0,
+#                         "output_tokens": 0,
+#                         "total_tokens": 0,
+#                         "model": (
+#                             TokenUsageService
+#                             .resolve_configured_model_name()
+#                         ),
+#                     },
+#                     bearer_token=(
+#                         dynamic_bearer_token
+#                     ),
+#                     company_id=company_id,
+#                     tender_id=tender_id,
+#                     project_id=project_id,
+#                     user_id=user_id,
+#                     evidence_summary_id=(
+#                         evidence_summary_id
+#                     ),
+#                     source_ids=[],
+#                     duration=0.0,
+#                 )
+
 #                 print(
-#                     "Evidence Summary token logging "
-#                     "skipped: no Evidence Summary LLM "
-#                     "call was made."
+#                     "Evidence Summary zero-token run "
+#                     "logged because no Evidence Summary "
+#                     "LLM call was required."
 #                 )
 
 #             evidence_found_count = sum(
@@ -5426,14 +5457,24 @@ class RequirementEvidenceSummaryAgent:
         evidence_summary_id: str,
         source_ids: list[str],
         duration: float,
+        llm_invocation_count: int,
     ) -> None:
         """
-        Send one aggregated token-usage log for the complete
-        Evidence Summary Agent run.
+        Send exactly one aggregated token-usage record for the
+        complete Evidence Summary Agent run.
 
         The bearer token is used only for the token-usage API.
-        It is never written to MongoDB or enterprise logs.
+        It is never saved in MongoDB or enterprise logs.
         """
+
+        normalized_user_id = str(
+            user_id or ""
+        ).strip()
+
+        if not normalized_user_id:
+            raise ValueError(
+                "UserId is required for Agent 2 token-usage logging."
+            )
 
         input_tokens = int(
             usage.get(
@@ -5454,27 +5495,51 @@ class RequirementEvidenceSummaryAgent:
         total_tokens = int(
             usage.get(
                 "total_tokens",
-                input_tokens + output_tokens,
+                0,
             )
-            or (
+            or 0
+        )
+
+        if total_tokens <= 0:
+            total_tokens = (
                 input_tokens
                 + output_tokens
             )
-        )
 
         model_name = str(
             usage.get(
                 "model",
                 "",
             )
+            or TokenUsageService
+            .resolve_configured_model_name()
             or ""
         ).strip()
 
-        payload = {
+        unique_source_ids: list[str] = []
+        seen_source_ids: set[str] = set()
+
+        for source_id_value in source_ids:
+            source_id = str(
+                source_id_value or ""
+            ).strip()
+
+            if (
+                not source_id
+                or source_id in seen_source_ids
+            ):
+                continue
+
+            seen_source_ids.add(source_id)
+            unique_source_ids.append(source_id)
+
+        raw_payload = {
             "applicationName": "Evidence Summary",
-            "sourceIds": source_ids,
-            "runId": evidence_summary_id,
-            "userId": user_id,
+            "sourceIds": unique_source_ids,
+            "runId": str(
+                evidence_summary_id
+            ),
+            "userId": normalized_user_id,
             "purpose": "Evidence Summary",
             "method": "ainvoke",
             "agentName": "Evidence Summary Agent",
@@ -5487,16 +5552,43 @@ class RequirementEvidenceSummaryAgent:
                 float(duration or 0),
                 3,
             ),
-            # TokenUsageService calculates cost using the model
-            # pricing table when value is zero.
             "cost": {
                 "currency": "USD",
                 "value": 0,
             },
-            "companyId": company_id,
-            "tenderId": tender_id,
-            "projectId": project_id,
+            "companyId": str(
+                company_id or ""
+            ),
+            "tenderId": str(
+                tender_id or ""
+            ),
+            "projectId": str(
+                project_id or ""
+            ),
         }
+
+        # Use the same central model-pricing logic as Agent 1.
+        request_payload = (
+            TokenUsageService.build_request_payload(
+                raw_payload
+            )
+        )
+
+        cost_data = request_payload.get(
+            "cost",
+            {
+                "currency": "USD",
+                "value": 0.0,
+            },
+        )
+
+        cost_value = float(
+            cost_data.get(
+                "value",
+                0,
+            )
+            or 0
+        )
 
         print(
             "Evidence Summary token logging state:",
@@ -5509,26 +5601,64 @@ class RequirementEvidenceSummaryAgent:
                     if bearer_token
                     else 0
                 ),
-                "companyId": company_id,
-                "tenderId": tender_id,
-                "projectId": project_id,
-                "userId": user_id,
-                "runId": evidence_summary_id,
-                "inputToken": input_tokens,
-                "outputToken": output_tokens,
-                "totalTokens": total_tokens,
-                "model": model_name,
-                "duration": payload[
-                    "duration"
-                ],
+                "companyId": request_payload.get(
+                    "companyId",
+                    "",
+                ),
+                "tenderId": request_payload.get(
+                    "tenderId",
+                    "",
+                ),
+                "projectId": request_payload.get(
+                    "projectId",
+                    "",
+                ),
+                "userId": request_payload.get(
+                    "userId",
+                    "",
+                ),
+                "runId": request_payload.get(
+                    "runId",
+                    "",
+                ),
+                "duration": request_payload.get(
+                    "duration",
+                    0,
+                ),
+                "llmInvocationCount": int(
+                    llm_invocation_count
+                ),
                 "sourceIdCount": len(
-                    source_ids
+                    unique_source_ids
+                ),
+                "usage": {
+                    "input_tokens": request_payload.get(
+                        "inputToken",
+                        0,
+                    ),
+                    "output_tokens": request_payload.get(
+                        "outputToken",
+                        0,
+                    ),
+                    "total_tokens": request_payload.get(
+                        "totalTokens",
+                        0,
+                    ),
+                    "model": request_payload.get(
+                        "model",
+                        model_name,
+                    ),
+                },
+                "cost": cost_data,
+                "formattedCost": format(
+                    cost_value,
+                    ".6f",
                 ),
             },
         )
 
         result = await TokenUsageService.log_usage(
-            payload=payload,
+            payload=request_payload,
             bearer_token=bearer_token,
         )
 
@@ -5547,9 +5677,31 @@ class RequirementEvidenceSummaryAgent:
             "Evidence Summary token usage "
             "logged successfully:",
             {
-                "runId": evidence_summary_id,
-                "model": model_name,
-                "totalTokens": total_tokens,
+                "runId": request_payload.get(
+                    "runId",
+                    "",
+                ),
+                "model": request_payload.get(
+                    "model",
+                    model_name,
+                ),
+                "inputToken": request_payload.get(
+                    "inputToken",
+                    0,
+                ),
+                "outputToken": request_payload.get(
+                    "outputToken",
+                    0,
+                ),
+                "totalTokens": request_payload.get(
+                    "totalTokens",
+                    0,
+                ),
+                "duration": request_payload.get(
+                    "duration",
+                    0,
+                ),
+                "cost": cost_data,
             },
         )
 
@@ -5917,6 +6069,8 @@ class RequirementEvidenceSummaryAgent:
     ) -> dict[str, Any]:
         del config
 
+        agent_run_start_time = time.perf_counter()
+
         payload = self.normalize_request_payload(
             input_data
         )
@@ -5992,6 +6146,37 @@ class RequirementEvidenceSummaryAgent:
                 tender_id=tender_id,
             )
         )
+
+        # The API request is the primary source for runtime identity.
+        # MongoDB is only a fallback for older standalone Agent 2 calls.
+        if not user_id:
+            user_id = str(
+                source_document.get("UserId")
+                or source_document.get("userId")
+                or source_document.get("user_id")
+                or ""
+            ).strip()
+
+        if not user_name:
+            user_name = str(
+                source_document.get("UserName")
+                or source_document.get("userName")
+                or source_document.get("user_name")
+                or ""
+            ).strip()
+
+        if not project_id:
+            project_id = str(
+                source_document.get("ProjectId")
+                or source_document.get("projectId")
+                or source_document.get("project_id")
+                or ""
+            ).strip()
+
+        if not user_id:
+            raise ValueError(
+                "UserId is required for Agent 2 token-usage logging."
+            )
 
         deduplicated_requirements = (
             extract_deduplicated_requirements(
@@ -6143,6 +6328,11 @@ class RequirementEvidenceSummaryAgent:
 
                 raise
 
+            agent_run_duration = (
+                time.perf_counter()
+                - agent_run_start_time
+            )
+
             # ------------------------------------------------
             # Aggregate Evidence Summary LLM usage for this run.
             # One token-usage HTTP request is sent, matching the
@@ -6220,19 +6410,6 @@ class RequirementEvidenceSummaryAgent:
                                 or 0
                             )
                         )
-                    )
-                    for record in (
-                        token_usage_records
-                    )
-                )
-
-                total_llm_duration = sum(
-                    float(
-                        record.get(
-                            "duration",
-                            0,
-                        )
-                        or 0
                     )
                     for record in (
                         token_usage_records
@@ -6354,7 +6531,10 @@ class RequirementEvidenceSummaryAgent:
                         unique_source_ids
                     ),
                     duration=(
-                        total_llm_duration
+                        agent_run_duration
+                    ),
+                    llm_invocation_count=len(
+                        token_usage_records
                     ),
                 )
 
@@ -6384,7 +6564,10 @@ class RequirementEvidenceSummaryAgent:
                         evidence_summary_id
                     ),
                     source_ids=[],
-                    duration=0.0,
+                    duration=(
+                        agent_run_duration
+                    ),
+                    llm_invocation_count=0,
                 )
 
                 print(

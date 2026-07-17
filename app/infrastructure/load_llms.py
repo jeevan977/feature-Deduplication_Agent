@@ -411,7 +411,7 @@ def create_llm() -> Any:
             model=mistral_model,
             api_key=mistral_api_key,
             temperature=temperature,
-            timeout=600,
+            timeout=2000,
         )
 
     if provider == "openai":
