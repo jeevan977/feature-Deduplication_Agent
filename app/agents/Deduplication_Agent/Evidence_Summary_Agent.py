@@ -1,13 +1,14 @@
 
-
-
 # from __future__ import annotations
+
 
 # import asyncio
 # import json
 # import os
 # import time
 # from datetime import datetime, timezone
+# from functools import lru_cache
+# from pathlib import Path
 # from typing import Any, Mapping, Optional, Sequence
 
 # from bson import ObjectId
@@ -22,6 +23,166 @@
 # )
 # from app.infrastructure.logger import Logging
 # from app.infrastructure.token_usage import TokenUsageService
+
+
+# EVIDENCE_AGENT_DIRECTORY = Path(__file__).resolve().parent
+# EVIDENCE_CONSTITUTION_PATH = (
+#     EVIDENCE_AGENT_DIRECTORY
+#     / "input_files"
+#     / "Evidence_Summary_Constitution.md"
+# )
+# EVIDENCE_SPECIFICATION_PATH = (
+#     EVIDENCE_AGENT_DIRECTORY
+#     / "input_files"
+#     / "Evidence_Summary_Specification.md"
+# )
+
+
+# @lru_cache(maxsize=4)
+# def read_required_instruction_file(
+#     file_path: str,
+# ) -> str:
+#     """Read and cache one required Agent 2 instruction file."""
+
+#     resolved_path = Path(file_path).resolve()
+
+#     if not resolved_path.is_file():
+#         raise FileNotFoundError(
+#             "Required Evidence Summary instruction file was not found: "
+#             f"{resolved_path}"
+#         )
+
+#     content = resolved_path.read_text(
+#         encoding="utf-8"
+#     ).strip()
+
+#     if not content:
+#         raise ValueError(
+#             "Required Evidence Summary instruction file is empty: "
+#             f"{resolved_path}"
+#         )
+
+#     return content
+
+
+# @lru_cache(maxsize=1)
+# def load_evidence_summary_instructions() -> tuple[str, str]:
+#     """Load Agent 2 constitution and specification once per process."""
+
+#     constitution = read_required_instruction_file(
+#         str(EVIDENCE_CONSTITUTION_PATH)
+#     )
+#     specification = read_required_instruction_file(
+#         str(EVIDENCE_SPECIFICATION_PATH)
+#     )
+
+#     print(
+#         "Evidence Summary instruction files loaded:",
+#         {
+#             "constitutionPath": str(
+#                 EVIDENCE_CONSTITUTION_PATH
+#             ),
+#             "specificationPath": str(
+#                 EVIDENCE_SPECIFICATION_PATH
+#             ),
+#             "constitutionCharacters": len(
+#                 constitution
+#             ),
+#             "specificationCharacters": len(
+#                 specification
+#             ),
+#         },
+#     )
+
+#     return constitution, specification
+
+
+# def deduplicate_evidence_sources(
+#     evidence_sources: list[dict[str, Any]],
+# ) -> list[dict[str, Any]]:
+#     """Remove repeated Qdrant chunks before the Evidence LLM call."""
+
+#     unique_sources: list[dict[str, Any]] = []
+#     seen_texts: set[str] = set()
+#     seen_ids: set[str] = set()
+
+#     for evidence_source in evidence_sources:
+#         evidence_id = str(
+#             evidence_source.get("EvidenceId", "")
+#             or ""
+#         ).strip()
+#         evidence_text = " ".join(
+#             str(
+#                 evidence_source.get("EvidenceText", "")
+#                 or ""
+#             ).split()
+#         ).casefold()
+
+#         if evidence_text:
+#             duplicate_key = f"text:{evidence_text}"
+#         elif evidence_id:
+#             duplicate_key = f"id:{evidence_id}"
+#         else:
+#             continue
+
+#         if duplicate_key in seen_texts:
+#             continue
+
+#         if evidence_id and evidence_id in seen_ids:
+#             continue
+
+#         seen_texts.add(duplicate_key)
+
+#         if evidence_id:
+#             seen_ids.add(evidence_id)
+
+#         unique_sources.append(
+#             dict(evidence_source)
+#         )
+
+#     if len(unique_sources) != len(evidence_sources):
+#         print(
+#             "Duplicate Qdrant evidence removed:",
+#             {
+#                 "retrievedCount": len(evidence_sources),
+#                 "uniqueCount": len(unique_sources),
+#                 "duplicatesRemoved": (
+#                     len(evidence_sources)
+#                     - len(unique_sources)
+#                 ),
+#             },
+#         )
+
+#     return unique_sources
+
+
+# def contains_prohibited_inference_language(
+#     *values: str,
+# ) -> bool:
+#     """Reject positive decisions that explicitly rely on inference."""
+
+#     combined_text = " ".join(
+#         str(value or "").casefold()
+#         for value in values
+#     )
+
+#     prohibited_phrases = (
+#         "implies",
+#         "suggests",
+#         "suggesting",
+#         "indicates a commitment",
+#         "indicating a commitment",
+#         "broadly supports",
+#         "appears to support",
+#         "likely demonstrates",
+#         "could mean",
+#         "generally aligns",
+#     )
+
+#     return any(
+#         phrase in combined_text
+#         for phrase in prohibited_phrases
+#     )
 
 
 # def utc_now() -> datetime:
@@ -223,31 +384,172 @@
 #     }
 
 
+# # def extract_deduplicated_requirements(
+# #     source_document: Mapping[str, Any],
+# # ) -> list[dict[str, Any]]:
+# #     candidate_paths = (
+# #         "Output.DeduplicatedRequirements",
+# #         "Result.DeduplicatedRequirements",
+# #         "Output.Result.DeduplicatedRequirements",
+# #         "DeduplicatedRequirements",
+# #     )
+
+# #     for path in candidate_paths:
+# #         value = get_nested_value(
+# #             source_document,
+# #             path,
+# #         )
+
+# #         if isinstance(value, list):
+# #             return [
+# #                 dict(item)
+# #                 for item in value
+# #                 if isinstance(item, Mapping)
+# #             ]
+
+# #     return []
+
 # def extract_deduplicated_requirements(
 #     source_document: Mapping[str, Any],
 # ) -> list[dict[str, Any]]:
-#     candidate_paths = (
-#         "Output.DeduplicatedRequirements",
-#         "Result.DeduplicatedRequirements",
-#         "Output.Result.DeduplicatedRequirements",
-#         "DeduplicatedRequirements",
+#     """
+#     Extract Agent 1 deduplicated requirements.
+
+#     New structure:
+#         JsonOutput.DeduplicatedRequirements
+
+#     Older structures remain supported for backward compatibility.
+#     """
+
+#     if not isinstance(
+#         source_document,
+#         Mapping,
+#     ):
+#         return []
+
+#     candidate_values: list[Any] = []
+
+#     # ------------------------------------------------------------
+#     # New Agent 1 MongoDB structure
+#     # ------------------------------------------------------------
+
+#     json_output = source_document.get(
+#         "JsonOutput"
 #     )
 
-#     for path in candidate_paths:
-#         value = get_nested_value(
-#             source_document,
-#             path,
+#     if isinstance(
+#         json_output,
+#         Mapping,
+#     ):
+#         candidate_values.append(
+#             json_output.get(
+#                 "DeduplicatedRequirements"
+#             )
 #         )
 
-#         if isinstance(value, list):
-#             return [
-#                 dict(item)
-#                 for item in value
-#                 if isinstance(item, Mapping)
-#             ]
+#     # ------------------------------------------------------------
+#     # API result wrapper
+#     # ------------------------------------------------------------
+
+#     result = source_document.get(
+#         "Result"
+#     )
+
+#     if isinstance(
+#         result,
+#         Mapping,
+#     ):
+#         result_json_output = result.get(
+#             "JsonOutput"
+#         )
+
+#         if isinstance(
+#             result_json_output,
+#             Mapping,
+#         ):
+#             candidate_values.append(
+#                 result_json_output.get(
+#                     "DeduplicatedRequirements"
+#                 )
+#             )
+
+#         # Backward compatibility
+#         result_output = result.get(
+#             "JsonOutput"
+#         )
+
+#         if isinstance(
+#             result_output,
+#             Mapping,
+#         ):
+#             candidate_values.append(
+#                 result_output.get(
+#                     "DeduplicatedRequirements"
+#                 )
+#             )
+
+#         candidate_values.append(
+#             result.get(
+#                 "DeduplicatedRequirements"
+#             )
+#         )
+
+#     # ------------------------------------------------------------
+#     # Older Agent 1 MongoDB structure
+#     # ------------------------------------------------------------
+
+#     old_output = source_document.get(
+#         "Output"
+#     )
+
+#     if isinstance(
+#         old_output,
+#         Mapping,
+#     ):
+#         candidate_values.append(
+#             old_output.get(
+#                 "DeduplicatedRequirements"
+#             )
+#         )
+
+#     # Direct fallback
+#     candidate_values.append(
+#         source_document.get(
+#             "DeduplicatedRequirements"
+#         )
+#     )
+
+#     # ------------------------------------------------------------
+#     # Return the first valid requirements array
+#     # ------------------------------------------------------------
+
+#     for candidate_value in candidate_values:
+#         if not isinstance(
+#             candidate_value,
+#             Sequence,
+#         ) or isinstance(
+#             candidate_value,
+#             (
+#                 str,
+#                 bytes,
+#                 bytearray,
+#             ),
+#         ):
+#             continue
+
+#         requirements = [
+#             dict(requirement)
+#             for requirement in candidate_value
+#             if isinstance(
+#                 requirement,
+#                 Mapping,
+#             )
+#         ]
+
+#         if requirements:
+#             return requirements
 
 #     return []
-
 
 # def get_requirement_is_regenerated(
 #     requirement: Mapping[str, Any],
@@ -256,7 +558,7 @@
 #         requirement,
 #         "IsRegenerated",
 #         "isRegenerated",
-#         "is_regenerated",
+#         "Regenerating",
 #         default=None,
 #     )
 
@@ -273,7 +575,7 @@
 #         or ""
 #     ).strip()
 
-#     if status_value.casefold() == "isregenerating":
+#     if status_value.casefold() == "regenerating":
 #         return True
 
 #     source_requirements = get_first_value(
@@ -292,7 +594,7 @@
 #                 source_requirement,
 #                 "IsRegenerated",
 #                 "isRegenerated",
-#                 "is_regenerated",
+#                 "Regenerating",
 #                 default=False,
 #             )
 #         )
@@ -314,7 +616,7 @@
 #         "IsGenerated": True,
 #         "IsRegenerated": is_regenerated,
 #         "Status": (
-#             "IsRegenerating"
+#             "Regenerating"
 #             if is_regenerated
 #             else "Active"
 #         ),
@@ -689,105 +991,54 @@
 #     evidence_sources: list[dict[str, Any]],
 # ) -> str:
 #     """
-#     Build the LLM prompt for one deduplicated requirement.
-
-#     The LLM receives only the selected Qdrant evidence chunks and
-#     returns the compact evidence decision fields required by MongoDB.
+#     Build one Agent 2 prompt from the external Constitution and
+#     Specification files plus the current requirement and evidence.
 #     """
 
-#     evidence_blocks: list[str] = []
-
-#     for evidence_index, evidence_source in enumerate(
-#         evidence_sources,
-#         start=1,
-#     ):
-#         evidence_blocks.append(
-#             "\n".join(
-#                 [
-#                     f"[Evidence {evidence_index}]",
-#                     (
-#                         "EvidenceId: "
-#                         f"{evidence_source.get('EvidenceId', '')}"
-#                     ),
-#                     (
-#                         "ChunkId: "
-#                         f"{evidence_source.get('ChunkId', '')}"
-#                     ),
-#                     (
-#                         "SourceTitle: "
-#                         f"{evidence_source.get('SourceTitle', '')}"
-#                     ),
-#                     (
-#                         "SourceDocument: "
-#                         f"{evidence_source.get('SourceDocument', '')}"
-#                     ),
-#                     (
-#                         "DocumentType: "
-#                         f"{evidence_source.get('DocumentType', '')}"
-#                     ),
-#                     (
-#                         "RelatedSection: "
-#                         f"{evidence_source.get('RelatedSection', '')}"
-#                     ),
-#                     (
-#                         "EvidenceScore: "
-#                         f"{evidence_source.get('EvidenceScore', 0)}"
-#                     ),
-#                     "EvidenceText:",
-#                     str(
-#                         evidence_source.get(
-#                             "EvidenceText",
-#                             "",
-#                         )
-#                     ),
-#                 ]
-#             )
-#         )
-
-#     evidence_text = "\n\n".join(
-#         evidence_blocks
+#     constitution, specification = (
+#         load_evidence_summary_instructions()
 #     )
 
-#     return f"""
-# You are the Evidence Summary Agent for a tender-response system.
+#     runtime_input = {
+#         "CanonicalRequirement": canonical_requirement,
+#         "IntentResult": {
+#             "CapabilityIntent": normalize_string_list(
+#                 intent_values.get("CapabilityIntent")
+#             ),
+#             "EvidenceSections": normalize_string_list(
+#                 intent_values.get("EvidenceSections")
+#             ),
+#             "SemanticAnchors": normalize_string_list(
+#                 intent_values.get("SemanticAnchors")
+#             ),
+#         },
+#         "RetrievedCompanyEvidence": evidence_sources,
+#     }
 
-# Evaluate whether the retrieved company evidence supports the tender requirement.
-
-# STRICT RULES:
-# 1. Use only the supplied evidence chunks.
-# 2. Do not invent clients, projects, certifications, figures, dates, technologies, outcomes or capabilities.
-# 3. EvidenceFound must be true only when the supplied chunks materially support the requirement.
-# 4. EvidenceReason must briefly explain why the evidence supports or does not support the requirement.
-# 5. EvidenceSummary must be concise and grounded only in the supplied evidence.
-# 6. MissingEvidenceReason must be null when EvidenceFound is true.
-# 7. When EvidenceFound is false, EvidenceSummary must be an empty string and MissingEvidenceReason must clearly state what evidence is missing.
-# 8. EvidenceConfidence must be a number between 0 and 1.
-# 9. Return valid JSON only. Do not return markdown or code fences.
-
-# TENDER REQUIREMENT:
-# {canonical_requirement}
-
-# CAPABILITY INTENT:
-# {json.dumps(intent_values.get('CapabilityIntent', []), ensure_ascii=False)}
-
-# EXPECTED EVIDENCE SECTIONS:
-# {json.dumps(intent_values.get('EvidenceSections', []), ensure_ascii=False)}
-
-# SEMANTIC ANCHORS:
-# {json.dumps(intent_values.get('SemanticAnchors', []), ensure_ascii=False)}
-
-# RETRIEVED COMPANY EVIDENCE:
-# {evidence_text}
-
-# Return exactly this JSON structure:
-# {{
-#   "EvidenceFound": true,
-#   "EvidenceReason": "Why the supplied evidence does or does not support the requirement.",
-#   "EvidenceSummary": "Concise evidence summary grounded only in the supplied chunks.",
-#   "EvidenceConfidence": 0.0,
-#   "MissingEvidenceReason": null
-# }}
-# """.strip()
+#     return "\n\n".join(
+#         [
+#             "EVIDENCE SUMMARY CONSTITUTION FILE:\n"
+#             + constitution,
+#             "EVIDENCE SUMMARY SPECIFICATION FILE:\n"
+#             + specification,
+#             (
+#                 "RUNTIME TASK:\n"
+#                 "Evaluate the complete tender requirement against "
+#                 "only the supplied company evidence. Follow the "
+#                 "Constitution and Specification exactly. Return "
+#                 "strict JSON only. Do not return markdown or "
+#                 "reasoning."
+#             ),
+#             (
+#                 "RUNTIME INPUT JSON:\n"
+#                 + json.dumps(
+#                     runtime_input,
+#                     ensure_ascii=False,
+#                     separators=(",", ":"),
+#                 )
+#             ),
+#         ]
+#     ).strip()
 
 
 # class RequirementEvidenceSummaryAgent:
@@ -1437,7 +1688,7 @@
 
 #         query["$and"].append(
 #             {
-#                 "Status": "IsRegenerated"
+#                 "Status": "Regenerating"
 #             }
 #         )
 
@@ -2405,11 +2656,11 @@
 #         semaphore: asyncio.Semaphore,
 #     ) -> dict[str, Any]:
 #         """
-#         Generate exactly one evidence-summary item for one Agent 1
-#         deduplicated requirement.
-
-#         A result is returned even when Qdrant finds no evidence.
+#         Generate exactly one validated evidence-summary item for one
+#         Agent 1 deduplicated requirement.
 #         """
+
+#         del tender_id, evidence_summary_id, bearer_token
 
 #         async with semaphore:
 #             canonical_requirement = str(
@@ -2430,13 +2681,13 @@
 #                     "CanonicalRequirement."
 #                 )
 
-#             deduplicated_requirement_id = str(
+#             canonicalRequirementId = str(
 #                 get_first_value(
 #                     requirement,
-#                     "DeduplicatedRequirementId",
-#                     "deduplicatedRequirementId",
+#                     "canonicalRequirementId",
+#                     "CanonicalRequirementId",
 #                     default=(
-#                         f"DEDUP-{requirement_number:04d}"
+#                         f"CR-{requirement_number:04d}"
 #                     ),
 #                 )
 #             ).strip()
@@ -2498,9 +2749,11 @@
 #                 search_query=search_query,
 #             )
 
-#             evidence_sources = (
-#                 self.normalize_qdrant_results(
-#                     qdrant_points
+#             retrieved_evidence_sources = (
+#                 deduplicate_evidence_sources(
+#                     self.normalize_qdrant_results(
+#                         qdrant_points
+#                     )
 #                 )
 #             )
 
@@ -2508,26 +2761,21 @@
 #                 "EvidenceSummaryItemId": (
 #                     f"EVIDENCE-{requirement_number:04d}"
 #                 ),
-#                 "DeduplicatedRequirementId": (
-#                     deduplicated_requirement_id
+#                 "CanonicalRequirementId": (
+#                     canonical_requirement_id
 #                 ),
-#                 "RequirementIds": (
-#                     requirement_ids
-#                 ),
+#                 "RequirementIds": requirement_ids,
 #                 "CanonicalRequirement": (
 #                     canonical_requirement
 #                 ),
-#                 "RequirementType": (
-#                     requirement_type
-#                 ),
+#                 "RequirementType": requirement_type,
 #                 "IntentResult": intent_result,
-#                 "EvidenceSources": evidence_sources,
+#                 # Only validated LLM-selected sources are saved here.
+#                 "EvidenceSources": [],
 #                 "Status": item_status,
 #             }
 
-#             # Every requirement receives an output item. When Qdrant
-#             # returns nothing, no LLM call is made.
-#             if not evidence_sources:
+#             if not retrieved_evidence_sources:
 #                 return {
 #                     **base_output,
 #                     "EvidenceFound": False,
@@ -2549,15 +2797,15 @@
 #                     canonical_requirement
 #                 ),
 #                 intent_values=intent_values,
-#                 evidence_sources=evidence_sources,
+#                 evidence_sources=(
+#                     retrieved_evidence_sources
+#                 ),
 #             )
 
 #             llm_start_time = time.perf_counter()
-
 #             llm_response = await self.invoke_llm(
 #                 prompt
 #             )
-
 #             llm_duration = (
 #                 time.perf_counter()
 #                 - llm_start_time
@@ -2567,21 +2815,16 @@
 #                 llm_response
 #             )
 
-#             source_ids = [
-#                 str(
+#             all_retrieved_source_ids = normalize_string_list(
+#                 [
 #                     evidence_source.get(
 #                         "EvidenceId",
 #                         "",
 #                     )
-#                 )
-#                 for evidence_source in evidence_sources
-#                 if str(
-#                     evidence_source.get(
-#                         "EvidenceId",
-#                         "",
-#                     )
-#                 ).strip()
-#             ]
+#                     for evidence_source
+#                     in retrieved_evidence_sources
+#                 ]
+#             )
 
 #             llm_usage = (
 #                 TokenUsageService.extract_token_usage(
@@ -2619,37 +2862,13 @@
 #                     or ""
 #                 ).strip(),
 #                 "duration": float(
-#                     llm_duration
-#                     or 0
+#                     llm_duration or 0
 #                 ),
-#                 "source_ids": source_ids,
+#                 # These are the sources supplied to the LLM.
+#                 "source_ids": (
+#                     all_retrieved_source_ids
+#                 ),
 #             }
-
-#             confidence_value = (
-#                 parsed_result.get(
-#                     "EvidenceConfidence",
-#                     parsed_result.get(
-#                         "Confidence",
-#                         0,
-#                     ),
-#                 )
-#             )
-
-#             try:
-#                 evidence_confidence = float(
-#                     confidence_value or 0
-#                 )
-
-#             except (TypeError, ValueError):
-#                 evidence_confidence = 0.0
-
-#             evidence_confidence = max(
-#                 0.0,
-#                 min(
-#                     1.0,
-#                     evidence_confidence,
-#                 ),
-#             )
 
 #             evidence_found = normalize_boolean(
 #                 parsed_result.get(
@@ -2674,47 +2893,152 @@
 #                 or ""
 #             ).strip()
 
-#             missing_evidence_reason_value = (
+#             missing_evidence_reason = str(
 #                 parsed_result.get(
-#                     "MissingEvidenceReason"
+#                     "MissingEvidenceReason",
+#                     "",
+#                 )
+#                 or ""
+#             ).strip()
+
+#             try:
+#                 evidence_confidence = float(
+#                     parsed_result.get(
+#                         "EvidenceConfidence",
+#                         0,
+#                     )
+#                     or 0
+#                 )
+#             except (TypeError, ValueError):
+#                 evidence_confidence = 0.0
+
+#             evidence_confidence = max(
+#                 0.0,
+#                 min(1.0, evidence_confidence),
+#             )
+
+#             supporting_evidence_ids = (
+#                 normalize_string_list(
+#                     parsed_result.get(
+#                         "SupportingEvidenceIds",
+#                         [],
+#                     )
 #                 )
 #             )
 
-#             missing_evidence_reason = (
+#             evidence_by_id = {
 #                 str(
-#                     missing_evidence_reason_value
+#                     evidence_source.get(
+#                         "EvidenceId",
+#                         "",
+#                     )
+#                     or ""
+#                 ).strip(): evidence_source
+#                 for evidence_source
+#                 in retrieved_evidence_sources
+#                 if str(
+#                     evidence_source.get(
+#                         "EvidenceId",
+#                         "",
+#                     )
 #                     or ""
 #                 ).strip()
-#             )
+#             }
 
-#             if evidence_found:
+#             unknown_supporting_ids = [
+#                 evidence_id
+#                 for evidence_id
+#                 in supporting_evidence_ids
+#                 if evidence_id not in evidence_by_id
+#             ]
+
+#             selected_evidence_sources = [
+#                 dict(evidence_by_id[evidence_id])
+#                 for evidence_id
+#                 in supporting_evidence_ids
+#                 if evidence_id in evidence_by_id
+#             ]
+
+#             invalid_positive_reasons: list[str] = []
+
+#             if evidence_found and unknown_supporting_ids:
+#                 invalid_positive_reasons.append(
+#                     "The LLM returned unknown SupportingEvidenceIds."
+#                 )
+
+#             if evidence_found and not selected_evidence_sources:
+#                 invalid_positive_reasons.append(
+#                     "No valid supporting evidence source was selected."
+#                 )
+
+#             if evidence_found and not evidence_summary:
+#                 invalid_positive_reasons.append(
+#                     "EvidenceSummary was empty for a positive decision."
+#                 )
+
+#             if evidence_found and (
+#                 contains_prohibited_inference_language(
+#                     evidence_reason,
+#                     evidence_summary,
+#                 )
+#             ):
+#                 invalid_positive_reasons.append(
+#                     "The positive decision relied on prohibited "
+#                     "inference language rather than direct evidence."
+#                 )
+
+#             if invalid_positive_reasons:
+#                 evidence_found = False
+#                 selected_evidence_sources = []
+#                 supporting_evidence_ids = []
+#                 evidence_summary = ""
+#                 evidence_confidence = 0.0
+#                 evidence_reason = " ".join(
+#                     invalid_positive_reasons
+#                 )
+
+#                 if not missing_evidence_reason:
+#                     missing_evidence_reason = (
+#                         "Direct, specific and verifiable company "
+#                         "evidence supporting the complete "
+#                         "requirement is missing."
+#                     )
+
+#             elif evidence_found:
 #                 missing_evidence_reason = None
 
 #                 if not evidence_reason:
 #                     evidence_reason = (
-#                         "The retrieved company evidence "
-#                         "materially supports the requirement."
+#                         "The selected company evidence directly "
+#                         "supports the complete requirement."
 #                     )
 
 #             else:
+#                 selected_evidence_sources = []
+#                 supporting_evidence_ids = []
 #                 evidence_summary = ""
 #                 evidence_confidence = 0.0
 
 #                 if not evidence_reason:
 #                     evidence_reason = (
 #                         "The retrieved chunks do not provide "
-#                         "sufficient support for the requirement."
+#                         "direct and complete support for the "
+#                         "requirement."
 #                     )
 
 #                 if not missing_evidence_reason:
 #                     missing_evidence_reason = (
-#                         "The retrieved evidence does not "
-#                         "sufficiently demonstrate the required "
-#                         "capability, compliance or experience."
+#                         "A direct policy, process, certification, "
+#                         "control, commitment, methodology or "
+#                         "verifiable record supporting the "
+#                         "requirement is missing."
 #                     )
 
 #             return {
 #                 **base_output,
+#                 "EvidenceSources": (
+#                     selected_evidence_sources
+#                 ),
 #                 "EvidenceFound": evidence_found,
 #                 "EvidenceReason": evidence_reason,
 #                 "EvidenceSummary": evidence_summary,
@@ -2725,8 +3049,6 @@
 #                 "MissingEvidenceReason": (
 #                     missing_evidence_reason
 #                 ),
-#                 # Internal-only usage information. generate() removes
-#                 # this field before saving the EvidenceSummary item.
 #                 "_TokenUsage": token_usage_record,
 #             }
 
@@ -2816,7 +3138,7 @@
 #         )
 
 #         final_status = (
-#             "IsRegenerated"
+#             "Regenerating"
 #             if is_regenerate
 #             else "Active"
 #         )
@@ -2880,7 +3202,7 @@
 #         destination_document = {
 #             "CompanyId": company_id,
 #             "TenderId": tender_id,
-#             "DeduplicationId": deduplication_id,
+#             "canonicalRequirementId": canonicalRequirementId,
 #             "IsRegenerate": is_regenerate,
 #             "UserId": user_id,
 #             "UserName": user_name,
@@ -2930,7 +3252,7 @@
 #         common_log_payload = {
 #             "companyId": company_id,
 #             "tenderId": tender_id,
-#             "deduplicationId": deduplication_id,
+#             "canonicalRequirementId": canonicalRequirementId,
 #             "evidenceSummaryId": (
 #                 evidence_summary_id
 #             ),
@@ -3466,6 +3788,7 @@
 
 from __future__ import annotations
 
+
 import asyncio
 import json
 import os
@@ -3848,31 +4171,172 @@ def build_company_tender_query(
     }
 
 
+# def extract_deduplicated_requirements(
+#     source_document: Mapping[str, Any],
+# ) -> list[dict[str, Any]]:
+#     candidate_paths = (
+#         "Output.DeduplicatedRequirements",
+#         "Result.DeduplicatedRequirements",
+#         "Output.Result.DeduplicatedRequirements",
+#         "DeduplicatedRequirements",
+#     )
+
+#     for path in candidate_paths:
+#         value = get_nested_value(
+#             source_document,
+#             path,
+#         )
+
+#         if isinstance(value, list):
+#             return [
+#                 dict(item)
+#                 for item in value
+#                 if isinstance(item, Mapping)
+#             ]
+
+#     return []
+
 def extract_deduplicated_requirements(
     source_document: Mapping[str, Any],
 ) -> list[dict[str, Any]]:
-    candidate_paths = (
-        "Output.DeduplicatedRequirements",
-        "Result.DeduplicatedRequirements",
-        "Output.Result.DeduplicatedRequirements",
-        "DeduplicatedRequirements",
+    """
+    Extract Agent 1 deduplicated requirements.
+
+    New structure:
+        JsonOutput.DeduplicatedRequirements
+
+    Older structures remain supported for backward compatibility.
+    """
+
+    if not isinstance(
+        source_document,
+        Mapping,
+    ):
+        return []
+
+    candidate_values: list[Any] = []
+
+    # ------------------------------------------------------------
+    # New Agent 1 MongoDB structure
+    # ------------------------------------------------------------
+
+    json_output = source_document.get(
+        "JsonOutput"
     )
 
-    for path in candidate_paths:
-        value = get_nested_value(
-            source_document,
-            path,
+    if isinstance(
+        json_output,
+        Mapping,
+    ):
+        candidate_values.append(
+            json_output.get(
+                "DeduplicatedRequirements"
+            )
         )
 
-        if isinstance(value, list):
-            return [
-                dict(item)
-                for item in value
-                if isinstance(item, Mapping)
-            ]
+    # ------------------------------------------------------------
+    # API result wrapper
+    # ------------------------------------------------------------
+
+    result = source_document.get(
+        "Result"
+    )
+
+    if isinstance(
+        result,
+        Mapping,
+    ):
+        result_json_output = result.get(
+            "JsonOutput"
+        )
+
+        if isinstance(
+            result_json_output,
+            Mapping,
+        ):
+            candidate_values.append(
+                result_json_output.get(
+                    "DeduplicatedRequirements"
+                )
+            )
+
+        # Backward compatibility with the older API wrapper.
+        result_output = result.get(
+            "Output"
+        )
+
+        if isinstance(
+            result_output,
+            Mapping,
+        ):
+            candidate_values.append(
+                result_output.get(
+                    "DeduplicatedRequirements"
+                )
+            )
+
+        candidate_values.append(
+            result.get(
+                "DeduplicatedRequirements"
+            )
+        )
+
+    # ------------------------------------------------------------
+    # Older Agent 1 MongoDB structure
+    # ------------------------------------------------------------
+
+    old_output = source_document.get(
+        "Output"
+    )
+
+    if isinstance(
+        old_output,
+        Mapping,
+    ):
+        candidate_values.append(
+            old_output.get(
+                "DeduplicatedRequirements"
+            )
+        )
+
+    # Direct fallback
+    candidate_values.append(
+        source_document.get(
+            "DeduplicatedRequirements"
+        )
+    )
+
+    # ------------------------------------------------------------
+    # Return the first valid requirements array
+    # ------------------------------------------------------------
+
+    for candidate_value in candidate_values:
+        if not isinstance(
+            candidate_value,
+            Sequence,
+        ) or isinstance(
+            candidate_value,
+            (
+                str,
+                bytes,
+                bytearray,
+            ),
+        ):
+            continue
+
+        requirements = [
+            dict(requirement)
+            for requirement in candidate_value
+            if isinstance(
+                requirement,
+                Mapping,
+            )
+        ]
+
+        if requirements:
+            return requirements
 
     return []
-
 
 def get_requirement_is_regenerated(
     requirement: Mapping[str, Any],
@@ -3881,7 +4345,7 @@ def get_requirement_is_regenerated(
         requirement,
         "IsRegenerated",
         "isRegenerated",
-        "is_regenerated",
+        "Regenerating",
         default=None,
     )
 
@@ -3898,7 +4362,7 @@ def get_requirement_is_regenerated(
         or ""
     ).strip()
 
-    if status_value.casefold() == "isregenerating":
+    if status_value.casefold() == "regenerating":
         return True
 
     source_requirements = get_first_value(
@@ -3917,7 +4381,7 @@ def get_requirement_is_regenerated(
                 source_requirement,
                 "IsRegenerated",
                 "isRegenerated",
-                "is_regenerated",
+                "Regenerating",
                 default=False,
             )
         )
@@ -3939,7 +4403,7 @@ def build_generation_fields(
         "IsGenerated": True,
         "IsRegenerated": is_regenerated,
         "Status": (
-            "IsRegenerating"
+            "Regenerating"
             if is_regenerated
             else "Active"
         ),
@@ -4372,7 +4836,7 @@ class RequirementEvidenceSummaryAgent:
 
     1. Read the latest successfully regenerated Requirement
        Deduplication result from MongoDB.
-    2. Extract Output.DeduplicatedRequirements[].
+    2. Extract JsonOutput.DeduplicatedRequirements[].
     3. Search company-specific evidence chunks in Qdrant.
     4. Send each requirement and its retrieved chunks to the LLM.
     5. Save the Evidence Summary output in MongoDB.
@@ -5011,7 +5475,13 @@ class RequirementEvidenceSummaryAgent:
 
         query["$and"].append(
             {
-                "Status": "IsRegenerated"
+                "Status": {
+                    "$in": [
+                        "Regenerating",
+                        "IsRegenerating",
+                        "IsRegenerated",
+                    ]
+                }
             }
         )
 
@@ -5041,7 +5511,7 @@ class RequirementEvidenceSummaryAgent:
 
         if source_document is None:
             raise ValueError(
-                "No IsRegenerated deduplication document was found "
+                "No completed/regenerating deduplication document was found "
                 "for the supplied CompanyId and TenderId. "
                 f"CompanyId: {company_id}. "
                 f"TenderId: {tender_id}."
@@ -5055,8 +5525,8 @@ class RequirementEvidenceSummaryAgent:
 
         if not deduplicated_requirements:
             raise ValueError(
-                "The IsRegenerated deduplication document does not "
-                "contain Output.DeduplicatedRequirements[]."
+                "The deduplication document does not contain "
+                "JsonOutput.DeduplicatedRequirements[]."
             )
 
         print(
@@ -6004,15 +6474,23 @@ class RequirementEvidenceSummaryAgent:
                     "CanonicalRequirement."
                 )
 
-            deduplicated_requirement_id = str(
+            canonical_requirement_id = str(
                 get_first_value(
                     requirement,
+                    "CanonicalRequirementId",
+                    "canonicalRequirementId",
+                    "canonical_requirement_id",
+
+                    # Backward compatibility with older Agent 1 output.
                     "DeduplicatedRequirementId",
                     "deduplicatedRequirementId",
+                    "deduplicated_requirement_id",
+
                     default=(
-                        f"DEDUP-{requirement_number:04d}"
+                        f"CR-{requirement_number:04d}"
                     ),
                 )
+                or f"CR-{requirement_number:04d}"
             ).strip()
 
             requirement_type = str(
@@ -6084,8 +6562,8 @@ class RequirementEvidenceSummaryAgent:
                 "EvidenceSummaryItemId": (
                     f"EVIDENCE-{requirement_number:04d}"
                 ),
-                "DeduplicatedRequirementId": (
-                    deduplicated_requirement_id
+                "CanonicalRequirementId": (
+                    canonical_requirement_id
                 ),
                 "RequirementIds": requirement_ids,
                 "CanonicalRequirement": (
@@ -6461,7 +6939,7 @@ class RequirementEvidenceSummaryAgent:
         )
 
         final_status = (
-            "IsRegenerated"
+            "Regenerating"
             if is_regenerate
             else "Active"
         )
@@ -6525,7 +7003,7 @@ class RequirementEvidenceSummaryAgent:
         destination_document = {
             "CompanyId": company_id,
             "TenderId": tender_id,
-            "DeduplicationId": deduplication_id,
+            # "DeduplicationId": deduplication_id,
             "IsRegenerate": is_regenerate,
             "UserId": user_id,
             "UserName": user_name,
@@ -6540,7 +7018,7 @@ class RequirementEvidenceSummaryAgent:
                 ),
                 "TotalEvidenceSummaries": 0,
             },
-            "Output": {
+            "JsonOutput": {
                 "EvidenceSummaries": []
             },
             "Status": "Processing",
@@ -6575,7 +7053,7 @@ class RequirementEvidenceSummaryAgent:
         common_log_payload = {
             "companyId": company_id,
             "tenderId": tender_id,
-            "deduplicationId": deduplication_id,
+            # "deduplicationId": deduplication_id,
             "evidenceSummaryId": (
                 evidence_summary_id
             ),
@@ -6949,12 +7427,15 @@ class RequirementEvidenceSummaryAgent:
                 {
                     "$set": {
                         "Summary": summary,
-                        "Output": output,
+                        "JsonOutput": output,
                         "Status": final_status,
                         "Error": None,
                         "UpdatedAt": completed_at,
                         "CompletedAt": completed_at,
-                    }
+                    },
+                    "$unset": {
+                        "Output": ""
+                    },
                 },
             )
 
@@ -6991,7 +7472,7 @@ class RequirementEvidenceSummaryAgent:
                 "Status": final_status,
                 "Result": {
                     "Summary": summary,
-                    "Output": output,
+                    "JsonOutput": output,
                 },
             }
 

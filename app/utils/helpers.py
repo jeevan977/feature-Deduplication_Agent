@@ -1415,10 +1415,16 @@ def validate_deduplication_result(
             [],
         )
 
+
+
+# "CanonicalRequirementId": (
+#     f"CR{len(deduplicated_requirements) + 1}"
+# ),
+
         deduplicated_requirements.append(
             {
-                "DeduplicatedRequirementId": (
-                    f"DEDUP-GROUP-{group_number:04d}"
+                "CanonicalRequirementId": (
+                    f"CR-{group_number:04d}"
                 ),
                 "CanonicalRequirement": group[
                     "CanonicalRequirement"
@@ -1471,7 +1477,7 @@ def validate_deduplication_result(
 
         deduplicated_requirements.append(
             {
-                "DeduplicatedRequirementId": (
+                "CanonicalRequirementId": (
                     f"DEDUP-UNIQUE-"
                     f"{unique_output_number:04d}"
                 ),

@@ -1987,7 +1987,7 @@ class RequirementDeduplicationAgent:
                     )
                 ),
                 "deduplicationStatus": (
-                    "Completed"
+                    "Complete"
                 ),
             }
 
@@ -1997,10 +1997,10 @@ class RequirementDeduplicationAgent:
                 is_success=True,
                 message=(
                     "Requirement deduplication "
-                    "completed"
+                    "complete"
                 ),
                 event_type=(
-                    "RequirementDeduplicationCompleted"
+                    "RequirementDeduplicationComplete"
                 ),
                 payload=completed_payload,
             )

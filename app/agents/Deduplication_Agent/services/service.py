@@ -654,7 +654,7 @@ class RequirementDeduplicationService:
                 "TotalDeduplicatedRequirements": 0,
                 "DuplicatesRemoved": 0,
             },
-            "Output": {
+            "JsonOutput": {
                 "DeduplicatedRequirements": []
             },
             "Status": "Processing",
@@ -764,8 +764,8 @@ class RequirementDeduplicationService:
                 {
                     "$set": {
                         "Summary": dict(summary),
-                        "Output": compact_output,
-                        "Status": "IsRegenerated",
+                        "JsonOutput": compact_output,
+                        "Status": "Regenerating",
                         "Error": None,
                         "UpdatedAt": completed_at,
                         "CompletedAt": completed_at,
@@ -780,7 +780,7 @@ class RequirementDeduplicationService:
                 "Status": "Completed",
                 "Result": {
                     "Summary": dict(summary),
-                    "Output": compact_output,
+                    "JsonOutput": compact_output,
                 },
             }
 
