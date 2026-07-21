@@ -1,355 +1,348 @@
 # Evidence Summary Agent Specification
 
-Version: 2.0
+Version: 2.1
 
-## PURPOSE
+## 1. Purpose
 
-This file controls the Evidence Summary LLM response structure.
+This file defines the exact LLM response structure for one deduplicated
+requirement.
 
-The response must be strict, valid JSON.
+Return strict, valid JSON only. Do not return Markdown, code fences,
+reasoning, comments or additional fields.
 
-Do not return markdown, code fences, comments, explanations or reasoning.
+## 2. Required LLM Response Schema
 
-## LLM RESPONSE SCHEMA
+Return exactly:
 
-The Evidence Summary LLM must return exactly this structure for one deduplicated requirement:
-
+```json
 {
-"EvidenceFound": false,
-"EvidenceReason": "The supplied evidence does not directly demonstrate the required obligation.",
-"EvidenceSummary": "",
-"EvidenceConfidence": 0.0,
-"MissingEvidenceReason": "A documented policy, process, certification, control, commitment or project record supporting the requirement is missing.",
-"SupportingEvidenceIds": []
+  "EvidenceFound": false,
+  "EvidenceReason": "No supplied evidence chunk directly supports the complete requirement.",
+  "EvidenceSummary": "",
+  "EvidenceConfidence": 0.0,
+  "MissingEvidenceReason": "A documented policy, process, certification, control, record or project example supporting the requirement is missing.",
+  "SupportingEvidenceIds": []
 }
+```
 
-## ALLOWED FIELDS
+## 3. Allowed Fields
 
-Return exactly these fields:
+Return exactly these six fields:
 
-* EvidenceFound
-* EvidenceReason
-* EvidenceSummary
-* EvidenceConfidence
-* MissingEvidenceReason
-* SupportingEvidenceIds
+- `EvidenceFound`
+- `EvidenceReason`
+- `EvidenceSummary`
+- `EvidenceConfidence`
+- `MissingEvidenceReason`
+- `SupportingEvidenceIds`
 
-Do not add any other fields.
+Do not add any other field.
 
-## EVIDENCEFOUND
+## 4. EvidenceFound
 
-Type: boolean
+Type: boolean.
 
-Allowed values:
+Set to `true` only when:
 
-* true
-* false
+- at least one supplied evidence chunk directly supports the requirement;
+- all material parts of the requirement are supported;
+- the decision requires no unsupported inference;
+- at least one valid supplied EvidenceId can be returned.
 
-Set EvidenceFound to true only when at least one supplied evidence chunk directly and materially supports the complete requirement.
+Set to `false` when:
 
-Set EvidenceFound to false when:
+- no evidence chunks were supplied;
+- no direct evidence exists;
+- evidence is generic, partial, unrelated or about a different obligation;
+- evidence omits a material condition;
+- the decision requires inference;
+- no valid supporting EvidenceId exists;
+- the requirement is a submission, declaration, form-completion or
+  contract-acceptance action for which company evidence is not applicable.
 
-* no direct evidence exists
-* evidence is generic marketing language
-* evidence supports only the general topic
-* evidence supports only part of the requirement
-* evidence is unrelated
-* evidence requires inference
-* evidence omits a material condition
-* evidence concerns a different obligation
-* no valid SupportingEvidenceId exists
+## 5. EvidenceReason
 
-## EVIDENCE REASON
+Type: non-empty string.
 
-Type: string
+It must:
 
-EvidenceReason must:
+- explain the decision concisely;
+- refer to the supplied evidence or state that none was supplied;
+- identify direct support, a specific gap, partial support or
+  non-applicability;
+- avoid unsupported interpretation.
 
-* be non-empty
-* explain the evidence decision
-* refer to the supplied evidence
-* remain concise
-* identify direct support or the specific evidence gap
-* avoid unsupported interpretation
+Do not use inference wording such as:
 
-EvidenceReason must not use inference wording such as:
+- implies;
+- suggests;
+- likely;
+- appears to support;
+- broadly supports;
+- generally aligns.
 
-* implies
-* suggests
-* indicates a commitment
-* broadly supports
-* appears to support
-* likely demonstrates
-* could mean
-* generally aligns
+### Non-applicable example
 
-## EVIDENCE SUMMARY
+```json
+"EvidenceReason": "This is a tender submission instruction and does not require supporting company evidence."
+```
 
-Type: string
+## 6. EvidenceSummary
 
-When EvidenceFound is true:
+Type: string.
 
-* EvidenceSummary must be non-empty
-* summarise only directly supported facts
-* connect those facts to the requirement
-* not add facts absent from the supplied evidence
-* not include promotional or proposal-writing language
+When `EvidenceFound` is `true`:
 
-When EvidenceFound is false:
+- return a concise factual summary;
+- use only facts stated in selected evidence;
+- connect those facts directly to the requirement;
+- do not add proposal or marketing language.
 
-* EvidenceSummary must be an empty string
+When `EvidenceFound` is `false`:
 
-## EVIDENCE CONFIDENCE
+```json
+"EvidenceSummary": ""
+```
 
-Type: number
+## 7. EvidenceConfidence
 
-Allowed range:
+Type: number from `0.0` to `1.0`.
 
-* 0.0 to 1.0
+Use:
 
-Rules:
+- `0.90` to `1.00`: explicit, direct and authoritative;
+- `0.75` to `0.89`: direct and specific with minor limitations;
+- `0.60` to `0.74`: direct but less authoritative;
+- `0.0`: every negative or non-applicable result.
 
-* return 0.0 when EvidenceFound is false
-* use 0.90 to 1.00 for explicit, direct and authoritative evidence
-* use 0.75 to 0.89 for direct and specific evidence with minor limitations
-* use 0.60 to 0.74 for relevant evidence that is direct but less authoritative
-* never return high confidence for generic marketing claims
-* duplicate evidence must not increase confidence
+Duplicate evidence must not increase confidence.
 
-## MISSING EVIDENCE REASON
+## 8. MissingEvidenceReason
 
-Type: string or null
+Type: string or null.
 
-When EvidenceFound is true:
+When `EvidenceFound` is `true`:
 
-* MissingEvidenceReason must be null
+```json
+"MissingEvidenceReason": null
+```
 
-When EvidenceFound is false:
+When evidence is applicable but missing:
 
-* MissingEvidenceReason must be a non-empty string
-* clearly state what evidence is missing
-* identify the missing policy, process, certification, control, commitment, methodology, record, project example or measurable result
+- return a non-empty string;
+- identify the specific missing policy, process, certification, control,
+  methodology, record, project example or measurable result;
+- do not use vague text such as “more evidence is needed”.
 
-Do not return vague messages such as:
+When company evidence is not applicable:
 
-* more evidence is required
-* evidence is insufficient
-* no relevant information was found
+- return a non-empty action-based explanation.
 
-State the specific missing evidence.
+Example:
 
-## SUPPORTING EVIDENCE IDS
+```json
+"MissingEvidenceReason": "Not applicable: this requirement must be satisfied by completing the tender submission worksheet."
+```
 
-Type: array of strings
+## 9. SupportingEvidenceIds
 
-When EvidenceFound is true:
+Type: array of strings.
 
-* include only EvidenceId values from supplied chunks
-* include only chunks that directly support the requirement
-* include at least one ID
-* exclude unrelated retrieved candidates
-* exclude duplicate IDs
-* exclude IDs whose EvidenceText duplicates another selected source without adding new support
+When `EvidenceFound` is `true`:
 
-When EvidenceFound is false:
+- include at least one EvidenceId supplied in the current prompt;
+- include only directly supporting evidence;
+- exclude unrelated candidates;
+- exclude duplicate IDs;
+- exclude duplicate evidence text that adds no new support.
 
-* return an empty array
+When `EvidenceFound` is `false`:
 
-Do not invent EvidenceId values.
+```json
+"SupportingEvidenceIds": []
+```
 
-## COMPLETE REQUIREMENT VALIDATION
+Never invent an EvidenceId.
 
-When the requirement contains multiple material obligations, all material obligations must be supported.
+## 10. Complete-Requirement Validation
 
-If only part of the requirement is supported:
+When the requirement contains multiple material obligations, all must be
+supported.
 
-* EvidenceFound must be false
-* EvidenceSummary must be empty
-* EvidenceConfidence must be 0.0
-* MissingEvidenceReason must identify the unsupported obligation
-* SupportingEvidenceIds must be empty
+When only part is supported, return:
 
-## GENERIC MARKETING VALIDATION
+```json
+{
+  "EvidenceFound": false,
+  "EvidenceReason": "The supplied evidence supports part of the requirement but does not support all material obligations.",
+  "EvidenceSummary": "",
+  "EvidenceConfidence": 0.0,
+  "MissingEvidenceReason": "Evidence supporting the remaining material obligation is missing.",
+  "SupportingEvidenceIds": []
+}
+```
 
-Generic statements are not direct evidence.
+The reason should name the unsupported obligation whenever possible.
 
-Examples include:
+## 11. Generic Marketing Validation
 
-* Risk Mitigation & Compliance Assurance
-* Uncompromising Quality & Reliability
-* Professional Finesse
-* Proven Expertise
-* Secure and Future-Ready Systems
-* Faster Time to Value
-* Industry Leadership
-* End-to-End Capability
+Generic marketing text alone must not produce a positive result.
 
-These statements must not produce EvidenceFound true unless another supplied chunk contains direct, specific supporting evidence.
+Examples:
 
-## FALSE RESULT EXAMPLE
+- proven expertise;
+- professional excellence;
+- secure and future-ready systems;
+- risk mitigation;
+- compliance assurance;
+- quality and reliability;
+- faster time to value;
+- end-to-end capability.
+
+## 12. Response Examples
+
+### Direct evidence found
 
 Requirement:
 
-“The supplier must ensure that all deliverables comply with applicable law.”
+`The supplier must maintain ISO 27001 certification.`
 
 Supplied evidence:
 
-“Risk Mitigation & Compliance Assurance.”
+- EvidenceId: `EVIDENCE-SOURCE-001`
+- EvidenceText: `The organisation maintains ISO 27001 certification under certificate ABC-123, valid until 31 December 2027.`
 
-Required response:
+Response:
 
+```json
 {
-"EvidenceFound": false,
-"EvidenceReason": "The supplied text is a generic marketing statement and does not directly demonstrate that all deliverables comply with applicable law.",
-"EvidenceSummary": "",
-"EvidenceConfidence": 0.0,
-"MissingEvidenceReason": "A documented legal-compliance policy, process, assurance statement or contractual control covering deliverables is missing.",
-"SupportingEvidenceIds": []
+  "EvidenceFound": true,
+  "EvidenceReason": "The supplied certification record explicitly confirms that the organisation maintains ISO 27001 certification.",
+  "EvidenceSummary": "The organisation holds ISO 27001 certification under certificate ABC-123, valid until 31 December 2027.",
+  "EvidenceConfidence": 0.98,
+  "MissingEvidenceReason": null,
+  "SupportingEvidenceIds": [
+    "EVIDENCE-SOURCE-001"
+  ]
 }
+```
 
-## TRUE RESULT EXAMPLE
+### No direct evidence
+
+```json
+{
+  "EvidenceFound": false,
+  "EvidenceReason": "The supplied evidence does not directly demonstrate the required worker-vetting process.",
+  "EvidenceSummary": "",
+  "EvidenceConfidence": 0.0,
+  "MissingEvidenceReason": "A documented worker-vetting policy, procedure or verification record is missing.",
+  "SupportingEvidenceIds": []
+}
+```
+
+### No evidence chunks supplied
+
+```json
+{
+  "EvidenceFound": false,
+  "EvidenceReason": "No company evidence chunks were supplied for evaluation.",
+  "EvidenceSummary": "",
+  "EvidenceConfidence": 0.0,
+  "MissingEvidenceReason": "Company evidence directly supporting the requirement is unavailable.",
+  "SupportingEvidenceIds": []
+}
+```
+
+### Submission instruction: evidence not applicable
 
 Requirement:
 
-“The supplier must maintain ISO 27001 certification.”
+`Complete the Total Cost of Delivery Worksheet.`
 
-Supplied evidence:
+Response:
 
-EvidenceId: EVIDENCE-SOURCE-001
-
-EvidenceText:
-
-“The organisation maintains ISO 27001 certification under certificate ABC-123, valid until 31 December 2027.”
-
-Valid response:
-
+```json
 {
-"EvidenceFound": true,
-"EvidenceReason": "The supplied certification record explicitly confirms that the organisation maintains ISO 27001 certification.",
-"EvidenceSummary": "The organisation holds ISO 27001 certification under certificate ABC-123, valid until 31 December 2027.",
-"EvidenceConfidence": 0.98,
-"MissingEvidenceReason": null,
-"SupportingEvidenceIds": [
-"EVIDENCE-SOURCE-001"
-]
+  "EvidenceFound": false,
+  "EvidenceReason": "This is a tender submission instruction and does not require supporting company evidence.",
+  "EvidenceSummary": "",
+  "EvidenceConfidence": 0.0,
+  "MissingEvidenceReason": "Not applicable: this requirement must be satisfied by completing the Total Cost of Delivery Worksheet.",
+  "SupportingEvidenceIds": []
 }
+```
 
-## PARTIAL EVIDENCE EXAMPLE
+### Contract acceptance: evidence not applicable
 
 Requirement:
 
-“The supplier must maintain ISO 27001 certification and provide annual audit reports.”
+`The Supplier must accept the confidentiality clause.`
 
-Supplied evidence:
+Response:
 
-“The organisation maintains ISO 27001 certification.”
-
-Required response:
-
+```json
 {
-"EvidenceFound": false,
-"EvidenceReason": "The supplied evidence confirms ISO 27001 certification but does not demonstrate that annual audit reports are provided.",
-"EvidenceSummary": "",
-"EvidenceConfidence": 0.0,
-"MissingEvidenceReason": "Evidence demonstrating the provision of annual audit reports is missing.",
-"SupportingEvidenceIds": []
+  "EvidenceFound": false,
+  "EvidenceReason": "This is a contract-acceptance requirement rather than a request for existing company evidence.",
+  "EvidenceSummary": "",
+  "EvidenceConfidence": 0.0,
+  "MissingEvidenceReason": "Not applicable: this requirement must be addressed through the legal or contract response.",
+  "SupportingEvidenceIds": []
 }
+```
 
-## APPLICATION OUTPUT ITEM
+## 13. Application Responsibilities
 
-After validating the LLM response, the application may build the complete MongoDB item:
+The application, not the LLM, adds:
 
-{
-"EvidenceSummaryItemId": "EVIDENCE-0001",
-"DeduplicatedRequirementId": "DEDUP-GROUP-0001",
-"RequirementIds": [
-"REQ-001",
-"REQ-002"
-],
-"CanonicalRequirement": "The supplier shall maintain ISO 27001 certification.",
-"RequirementType": "Compliance",
-"IntentResult": {
-"CapabilityIntent": [],
-"EvidenceSections": [],
-"SemanticAnchors": []
-},
-"EvidenceFound": true,
-"EvidenceSources": [
-{
-"EvidenceId": "EVIDENCE-SOURCE-001",
-"ChunkId": "CHUNK-001",
-"SourceTitle": "Information Security Policy",
-"SourceDocument": "Security Policy.pdf",
-"DocumentType": "Policy",
-"RelatedSection": "Certifications",
-"EvidenceText": "The organisation maintains ISO 27001 certification.",
-"EvidenceScore": 0.82,
-"EvidenceDate": "2026-07-15T11:51:29.690857"
-}
-],
-"EvidenceReason": "The supplied security policy explicitly confirms that the organisation maintains ISO 27001 certification.",
-"EvidenceSummary": "The organisation maintains ISO 27001 certification, directly supporting the certification requirement.",
-"EvidenceConfidence": 0.95,
-"MissingEvidenceReason": null,
-"Status": "IsRegenerated"
-}
+- `EvidenceSummaryItemId`;
+- `CanonicalRequirementId`;
+- `RequirementIds`;
+- `CanonicalRequirement`;
+- `RequirementType`;
+- `IntentResult`;
+- `EvidenceSources`;
+- operational `Status`.
 
-The application, not the LLM, should add:
+The application must:
 
-* EvidenceSummaryItemId
-* DeduplicatedRequirementId
-* RequirementIds
-* CanonicalRequirement
-* RequirementType
-* IntentResult
-* EvidenceSources
-* Status
+1. validate every returned SupportingEvidenceId against supplied Qdrant
+   results;
+2. reject unknown IDs;
+3. remove duplicate IDs and duplicate evidence text;
+4. build EvidenceSources only from validated supporting IDs;
+5. save an empty EvidenceSources array when EvidenceFound is false;
+6. never save all retrieved candidates automatically;
+7. preserve one output item for every canonical requirement.
 
-The application must build EvidenceSources only from the SupportingEvidenceIds returned by the LLM.
+## 14. Final Validation Rules
 
-## APPLICATION FILTERING RULE
+A valid LLM response requires:
 
-Before saving the final item:
+1. exactly the six allowed fields;
+2. `EvidenceFound` is boolean;
+3. `EvidenceReason` is non-empty;
+4. `EvidenceConfidence` is between `0.0` and `1.0`;
+5. positive result:
+   - non-empty EvidenceSummary;
+   - null MissingEvidenceReason;
+   - at least one valid SupportingEvidenceId;
+6. negative result:
+   - empty EvidenceSummary;
+   - confidence `0.0`;
+   - non-empty MissingEvidenceReason;
+   - empty SupportingEvidenceIds;
+7. no invented or unknown EvidenceId;
+8. no generic marketing-only positive result;
+9. no partial-evidence positive result;
+10. directly parseable JSON.
 
-1. Validate every SupportingEvidenceId against the supplied Qdrant results.
-2. Reject unknown EvidenceId values.
-3. Remove duplicate SupportingEvidenceIds.
-4. Build EvidenceSources only from validated SupportingEvidenceIds.
-5. When EvidenceFound is false, save EvidenceSources as an empty array.
-6. Do not save all Qdrant candidates as EvidenceSources.
-7. Do not allow duplicate EvidenceText to increase confidence.
-
-## VALIDATION RULES
-
-A valid response requires:
-
-1. EvidenceFound is a boolean.
-2. EvidenceReason is a non-empty string.
-3. EvidenceConfidence is between 0 and 1.
-4. When EvidenceFound is true:
-
-   * EvidenceSummary is non-empty.
-   * MissingEvidenceReason is null.
-   * SupportingEvidenceIds contains at least one supplied EvidenceId.
-5. When EvidenceFound is false:
-
-   * EvidenceSummary is empty.
-   * EvidenceConfidence is 0.0.
-   * MissingEvidenceReason is non-empty.
-   * SupportingEvidenceIds is empty.
-6. Every SupportingEvidenceId exists in the supplied evidence.
-7. No unsupported field is returned.
-8. The response is parseable using json.loads().
-9. Generic marketing text alone must not produce EvidenceFound true.
-10. Partial evidence must not produce EvidenceFound true.
-
-## JSON RULES
+## 15. JSON Rules
 
 1. Return one JSON object only.
 2. Use double quotes for property names and string values.
 3. Do not include trailing commas.
-4. Do not include markdown fences.
-5. Do not include comments.
-6. Do not include reasoning.
-7. Do not add extra properties.
-8. Do not return null for required strings or arrays.
+4. Do not include Markdown fences.
+5. Do not include comments or reasoning.
+6. Do not add extra properties.
+7. Do not return null for required strings or arrays.
