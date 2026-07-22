@@ -28,13 +28,22 @@ class DeduplicationRequest(BaseModel):
         description="Tender identifier",
     )
 
+    # IsRegenerate: bool = Field(
+    #     default=False,
+    #     description=(
+    #         "True when the requirements are being "
+    #         "regenerated; otherwise false"
+    #     ),
+    # )
+
+
     IsRegenerate: bool = Field(
         default=False,
         description=(
-            "True when the requirements are being "
-            "regenerated; otherwise false"
+            "False sets the status to Active; "
+            "True sets the status to IsRegenerating."
         ),
-    )
+)
 
     UserId: str = Field(
         default="",
@@ -61,3 +70,5 @@ class DeduplicationRequest(BaseModel):
             "token-usage API logging"
         ),
     )
+
+

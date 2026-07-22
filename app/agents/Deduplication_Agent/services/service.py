@@ -539,6 +539,13 @@ class RequirementDeduplicationService:
             )
         )
 
+        final_status = (
+            "Regenerating"
+            if is_regenerate
+            else "Active"
+        )
+
+
         user_id = str(
             payload.get(
                 "UserId",
@@ -765,7 +772,7 @@ class RequirementDeduplicationService:
                     "$set": {
                         "Summary": dict(summary),
                         "JsonOutput": compact_output,
-                        "Status": "Regenerating",
+                        "Status": final_status,
                         "Error": None,
                         "UpdatedAt": completed_at,
                         "CompletedAt": completed_at,
