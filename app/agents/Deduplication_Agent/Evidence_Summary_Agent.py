@@ -3394,14 +3394,65 @@ class RequirementEvidenceSummaryAgent:
         }
 
 
-        insert_result = await asyncio.to_thread(
-            self.destination_collection.insert_one,
-            destination_document,
+        # insert_result = await asyncio.to_thread(
+        #     self.destination_collection.insert_one,
+        #     destination_document,
+        # )
+
+        # evidence_summary_object_id = (
+        #     insert_result.inserted_id
+        # )
+
+        document_filter = {
+            "CompanyId": company_id,
+            "TenderId": tender_id,
+        }
+
+        existing_document = await asyncio.to_thread(
+            self.destination_collection.find_one,
+            document_filter,
+            {
+                "_id": 1,
+                "CreatedAt": 1,
+            },
         )
 
-        evidence_summary_object_id = (
-            insert_result.inserted_id
-        )
+        if existing_document:
+            evidence_summary_object_id = (
+                existing_document["_id"]
+            )
+
+            destination_document["_id"] = (
+                evidence_summary_object_id
+            )
+
+            destination_document["CreatedAt"] = (
+                existing_document.get(
+                    "CreatedAt",
+                    created_at,
+                )
+            )
+
+            await asyncio.to_thread(
+                self.destination_collection.replace_one,
+                {
+                    "_id": evidence_summary_object_id,
+                },
+                destination_document,
+                upsert=False,
+            )
+
+        else:
+            insert_result = await asyncio.to_thread(
+                self.destination_collection.insert_one,
+                destination_document,
+            )
+
+            evidence_summary_object_id = (
+                insert_result.inserted_id
+            )
+
+
 
         evidence_summary_id = str(
             evidence_summary_object_id
