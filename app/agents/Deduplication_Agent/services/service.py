@@ -10,7 +10,7 @@ from typing import Any, Mapping, Sequence
 
 from bson import ObjectId
 from pymongo.collection import Collection
-
+from pymongo import ReturnDocument
 from app.agents.Deduplication_Agent.Agent import (
     RequirementDeduplicationAgent,
 )
@@ -675,14 +675,36 @@ class RequirementDeduplicationService:
         # Insert destination Mongo document
         # ----------------------------------------------
 
-        insert_result = await asyncio.to_thread(
-            self.destination_collection.insert_one,
+        # insert_result = await asyncio.to_thread(
+        #     self.destination_collection.insert_one,
+        #     destination_document,
+        # )
+
+        # deduplication_id = (
+        #     insert_result.inserted_id
+        # )
+
+        saved_document = await asyncio.to_thread(
+            self.destination_collection.find_one_and_replace,
+            {
+                "CompanyId": company_id,
+                "TenderId": tender_id,
+            },
             destination_document,
+            upsert=True,
+            return_document=ReturnDocument.AFTER,
         )
 
-        deduplication_id = (
-            insert_result.inserted_id
-        )
+        if not saved_document:
+            raise RuntimeError(
+                "Failed to create or overwrite the "
+                "deduplication document."
+            )
+
+        deduplication_id = saved_document["_id"]
+
+
+
 
         try:
             # context = {

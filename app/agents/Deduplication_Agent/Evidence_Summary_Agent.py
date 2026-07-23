@@ -24,7 +24,8 @@ from app.infrastructure.load_llms import (
 )
 from app.infrastructure.logger import Logging
 from app.infrastructure.token_usage import TokenUsageService
-
+from langchain_mistralai import MistralAIEmbeddings
+from langchain_openai import OpenAIEmbeddings
 
 EVIDENCE_AGENT_DIRECTORY = Path(__file__).resolve().parent
 EVIDENCE_CONSTITUTION_PATH = (
@@ -1085,12 +1086,51 @@ class RequirementEvidenceSummaryAgent:
 
         return self._llm
 
+    # @property
+    # def embeddings(self) -> Any:
+    #     if self._embeddings is None:
+    #         embedding_model = get_environment_value(
+    #             "EMBEDDING_MODEL",
+    #             "text-embedding-3-small",
+    #         )
+
+    #         self._embeddings = OpenAIEmbeddings(
+    #             model=embedding_model,
+    #             api_key=get_openai_api_key(),
+    #         )
+
+    #     return self._embeddings
     @property
     def embeddings(self) -> Any:
-        if self._embeddings is None:
+        if self._embeddings is not None:
+            return self._embeddings
+
+        provider = get_required_environment_value(
+            "LLM_PROVIDER"
+        ).lower()
+
+        if provider == "mistral":
             embedding_model = get_environment_value(
-                "EMBEDDING_MODEL",
-                "text-embedding-3-small",
+                "MISTRAL_EMBEDDING_MODEL",
+                "mistral-embed",
+            )
+
+            self._embeddings = MistralAIEmbeddings(
+                model=embedding_model,
+                api_key=get_required_environment_value(
+                    "MISTRAL_API_KEY"
+                ),
+            )
+
+            return self._embeddings
+
+        if provider == "openai":
+            embedding_model = get_environment_value(
+                "OPENAI_EMBEDDING_MODEL",
+                get_environment_value(
+                    "EMBEDDING_MODEL",
+                    "text-embedding-3-small",
+                ),
             )
 
             self._embeddings = OpenAIEmbeddings(
@@ -1098,7 +1138,13 @@ class RequirementEvidenceSummaryAgent:
                 api_key=get_openai_api_key(),
             )
 
-        return self._embeddings
+            return self._embeddings
+
+        raise ValueError(
+            f"Unsupported embedding provider: {provider}. "
+            "Supported providers are mistral and openai."
+        )
+
 
     @staticmethod
     def normalize_qdrant_url(
