@@ -1,220 +1,435 @@
-# Evidence Summary Agent Specification
+Evidence Summary Agent Specification
 
-Version: 2.1
+Version: 2.3
 
-## 1. Purpose
+1. Purpose
 
-This file defines the exact LLM response structure for one deduplicated
-requirement.
+This file defines the exact LLM response structure for evaluating one deduplicated requirement against supplied evidence chunks.
 
-Return strict, valid JSON only. Do not return Markdown, code fences,
-reasoning, comments or additional fields.
+Follow the Evidence Summary Agent Constitution for all applicability, grounding, accuracy, hallucination and traceability decisions.
 
-## 2. Required LLM Response Schema
+Return strict, valid JSON only.
+
+2. Required Response Schema
 
 Return exactly:
 
-```json
 {
   "EvidenceFound": false,
-  "EvidenceReason": "No supplied evidence chunk directly supports the complete requirement.",
+  "EvidenceReason": "No supplied evidence directly supports the complete requirement.",
   "EvidenceSummary": "",
   "EvidenceConfidence": 0.0,
-  "MissingEvidenceReason": "A documented policy, process, certification, control, record or project example supporting the requirement is missing.",
+  "MissingEvidenceReason": "No supplied evidence directly demonstrates the unsupported requirement element.",
   "SupportingEvidenceIds": []
 }
-```
 
-## 3. Allowed Fields
+3. Allowed Fields
 
 Return exactly these six fields:
 
-- `EvidenceFound`
-- `EvidenceReason`
-- `EvidenceSummary`
-- `EvidenceConfidence`
-- `MissingEvidenceReason`
-- `SupportingEvidenceIds`
+EvidenceFound
+
+EvidenceReason
+
+EvidenceSummary
+
+EvidenceConfidence
+
+MissingEvidenceReason
+
+SupportingEvidenceIds
 
 Do not add any other field.
 
-## 4. EvidenceFound
+4. Mandatory Decision Sequence
 
-Type: boolean.
+Apply these steps in order:
 
-Set to `true` only when:
+Determine whether the requirement asks for proof of an existing company capability, record, policy, process, certification, control, methodology or experience.
 
-- at least one supplied evidence chunk directly supports the requirement;
-- all material parts of the requirement are supported;
-- the decision requires no unsupported inference;
-- at least one valid supplied EvidenceId can be returned.
+If not, classify the requirement as evidence not applicable.
 
-Set to `false` when:
+If evidence is applicable, evaluate all supplied chunks.
 
-- no evidence chunks were supplied;
-- no direct evidence exists;
-- evidence is generic, partial, unrelated or about a different obligation;
-- evidence omits a material condition;
-- the decision requires inference;
-- no valid supporting EvidenceId exists;
-- the requirement is a submission, declaration, form-completion or
-  contract-acceptance action for which company evidence is not applicable.
+Return a positive result only when selected evidence supports every material requirement element.
 
-## 5. EvidenceReason
+Validate source IDs, field consistency and JSON structure.
 
-Type: non-empty string.
+Do not evaluate evidence applicability from RequirementType, IntentResult, EvidenceSections, SemanticAnchors or retrieval score alone.
 
-It must:
+The authoritative source is the complete CanonicalRequirement.
 
-- explain the decision concisely;
-- refer to the supplied evidence or state that none was supplied;
-- identify direct support, a specific gap, partial support or
-  non-applicability;
-- avoid unsupported interpretation.
+5. Evidence Applicability Rules
 
-Do not use inference wording such as:
+5.1 Evidence-applicable
 
-- implies;
-- suggests;
-- likely;
-- appears to support;
-- broadly supports;
-- generally aligns.
+Evidence is applicable when the requirement explicitly asks the supplier to demonstrate, provide, maintain, hold, possess, describe or evidence an existing:
 
-### Non-applicable example
+capability;
 
-```json
-"EvidenceReason": "This is a tender submission instruction and does not require supporting company evidence."
-```
+policy or procedure;
 
-## 6. EvidenceSummary
+certification or accreditation;
 
-Type: string.
+control or methodology;
 
-When `EvidenceFound` is `true`:
+qualification or training record;
 
-- return a concise factual summary;
-- use only facts stated in selected evidence;
-- connect those facts directly to the requirement;
-- do not add proposal or marketing language.
+project or delivery experience;
 
-When `EvidenceFound` is `false`:
+service record or measurable result.
 
-```json
-"EvidenceSummary": ""
-```
+5.2 Evidence not applicable
 
-## 7. EvidenceConfidence
+Evidence is normally not applicable when the requirement is satisfied through:
 
-Type: number from `0.0` to `1.0`.
+a warranty, representation or declaration;
 
-Use:
+acknowledgment or confirmation;
 
-- `0.90` to `1.00`: explicit, direct and authoritative;
-- `0.75` to `0.89`: direct and specific with minor limitations;
-- `0.60` to `0.74`: direct but less authoritative;
-- `0.0`: every negative or non-applicable result.
+contract acceptance;
 
-Duplicate evidence must not increase confidence.
+liability, indemnity or risk allocation;
 
-## 8. MissingEvidenceReason
+entering into a future agreement;
 
-Type: string or null.
+completing a form, worksheet or submission action;
 
-When `EvidenceFound` is `true`:
+a future commitment to comply, perform, notify, sign, submit or provide;
 
-```json
-"MissingEvidenceReason": null
-```
+compliance with buyer-specific policies during future delivery.
 
-When evidence is applicable but missing:
+When not applicable, return:
 
-- return a non-empty string;
-- identify the specific missing policy, process, certification, control,
-  methodology, record, project example or measurable result;
-- do not use vague text such as “more evidence is needed”.
+{
+  "EvidenceFound": false,
+  "EvidenceReason": "This requirement is satisfied through the tender, legal or contractual response and does not require existing company evidence.",
+  "EvidenceSummary": "",
+  "EvidenceConfidence": 0.0,
+  "MissingEvidenceReason": "Not applicable: this requirement must be addressed through the tender, legal or contract response.",
+  "SupportingEvidenceIds": []
+}
 
-When company evidence is not applicable:
+Do not say that a policy, process, control, agreement or record is missing for a non-applicable requirement.
 
-- return a non-empty action-based explanation.
+5.3 Existing-state override
+
+A requirement containing future obligations is evidence-applicable only when it also explicitly requests proof of an existing state.
 
 Example:
 
-```json
-"MissingEvidenceReason": "Not applicable: this requirement must be satisfied by completing the tender submission worksheet."
-```
+The Supplier must demonstrate that it has an established worker-vetting process and must maintain it throughout the contract.
 
-## 9. SupportingEvidenceIds
+This is evidence-applicable because it explicitly requires demonstration of an existing process.
+
+5.4 Ambiguity rule
+
+If the wording does not explicitly request proof of an existing capability, document, record, process or experience, classify the requirement as evidence not applicable.
+
+Do not infer an evidence request from the topic alone.
+
+6. EvidenceFound
+
+Type: boolean.
+
+Set to true only when:
+
+the requirement is evidence-applicable;
+
+at least one supplied chunk directly supports it;
+
+the selected evidence collectively supports every material part;
+
+no unsupported inference is required;
+
+at least one valid supplied EvidenceId is returned.
+
+Set to false when:
+
+evidence is not applicable;
+
+no chunks were supplied;
+
+no direct evidence exists;
+
+evidence is generic, partial, unrelated or contradictory;
+
+a material condition, exception, scope, timeframe, standard or obligation is unsupported;
+
+the decision requires inference;
+
+no valid supporting ID exists.
+
+7. Evidence Coverage
+
+For an evidence-applicable requirement:
+
+review all potentially relevant supplied chunks;
+
+do not stop after the first match;
+
+include all non-duplicative chunks required to support the complete positive decision;
+
+exclude unrelated, generic, partial, contradictory and duplicate evidence;
+
+do not allow duplicate evidence to increase confidence.
+
+8. EvidenceReason
+
+Type: non-empty string.
+
+For a positive result, state what direct evidence supports the complete requirement.
+
+For evidence-applicable but unsupported requirements, identify the unsupported element neutrally.
+
+For non-applicable requirements, identify the response action or contractual treatment.
+
+Valid examples:
+
+"EvidenceReason": "The supplied certification record explicitly confirms that the organisation maintains ISO 27001 certification."
+
+"EvidenceReason": "No supplied evidence directly demonstrates the required annual review frequency."
+
+"EvidenceReason": "This is a contractual liability requirement rather than a request for existing company evidence."
+
+Do not use:
+
+implies;
+
+suggests;
+
+likely;
+
+appears to support;
+
+broadly supports;
+
+generally aligns.
+
+9. EvidenceSummary
+
+Type: string.
+
+When EvidenceFound is true:
+
+use only facts explicitly stated in selected evidence;
+
+explain how the facts support the requirement;
+
+preserve all relevant scope, conditions, exceptions, dates, values and limitations;
+
+do not add proposal, marketing or unsupported wording;
+
+ensure every material claim is traceable to returned evidence IDs.
+
+When EvidenceFound is false, return:
+
+"EvidenceSummary": ""
+
+10. EvidenceConfidence
+
+Type: number from 0.0 to 1.0.
+
+Use:
+
+0.90 to 1.00: explicit, direct and authoritative;
+
+0.75 to 0.89: direct and specific with minor limitations;
+
+0.60 to 0.74: direct but less authoritative;
+
+0.0: every negative or non-applicable result.
+
+Retrieval score and duplicate evidence must not increase confidence.
+
+11. MissingEvidenceReason
+
+Type: string or null.
+
+When EvidenceFound is true, return:
+
+"MissingEvidenceReason": null
+
+When evidence is applicable but insufficient:
+
+identify the unsupported requirement element neutrally;
+
+name a specific policy, process, certification, control or record only when the requirement explicitly asks for it;
+
+do not claim the company lacks something merely because it was not supplied.
+
+Example:
+
+"MissingEvidenceReason": "No supplied evidence directly demonstrates the required worker-vetting process."
+
+When evidence is not applicable:
+
+"MissingEvidenceReason": "Not applicable: this requirement must be addressed through the tender, legal or contract response."
+
+12. SupportingEvidenceIds
 
 Type: array of strings.
 
-When `EvidenceFound` is `true`:
+When EvidenceFound is true:
 
-- include at least one EvidenceId supplied in the current prompt;
-- include only directly supporting evidence;
-- exclude unrelated candidates;
-- exclude duplicate IDs;
-- exclude duplicate evidence text that adds no new support.
+include at least one supplied EvidenceId;
 
-When `EvidenceFound` is `false`:
+include only directly supporting evidence;
 
-```json
+include all non-duplicative sources required for full support;
+
+preserve IDs exactly;
+
+exclude unrelated, generic, partial, contradictory and duplicate evidence.
+
+When EvidenceFound is false, return:
+
 "SupportingEvidenceIds": []
-```
 
-Never invent an EvidenceId.
+Never invent, modify or infer an evidence ID.
 
-## 10. Complete-Requirement Validation
+13. Complete-Requirement and Semantic Validation
 
-When the requirement contains multiple material obligations, all must be
-supported.
+Every material element must be supported.
+
+Preserve:
+
+responsible party;
+
+action and object;
+
+scope;
+
+trigger and condition;
+
+exception and exclusion;
+
+negation and prohibition;
+
+timeframe and frequency;
+
+standard, certification, quantity and threshold;
+
+legal and contractual effect.
+
+Do not reverse an exception or change the source meaning.
 
 When only part is supported, return:
 
-```json
 {
   "EvidenceFound": false,
   "EvidenceReason": "The supplied evidence supports part of the requirement but does not support all material obligations.",
   "EvidenceSummary": "",
   "EvidenceConfidence": 0.0,
-  "MissingEvidenceReason": "Evidence supporting the remaining material obligation is missing.",
+  "MissingEvidenceReason": "The supplied evidence does not demonstrate the remaining material obligation.",
   "SupportingEvidenceIds": []
 }
-```
 
-The reason should name the unsupported obligation whenever possible.
+14. Contractual and Response-Action Examples
 
-## 11. Generic Marketing Validation
-
-Generic marketing text alone must not produce a positive result.
-
-Examples:
-
-- proven expertise;
-- professional excellence;
-- secure and future-ready systems;
-- risk mitigation;
-- compliance assurance;
-- quality and reliability;
-- faster time to value;
-- end-to-end capability.
-
-## 12. Response Examples
-
-### Direct evidence found
+14.1 Tender warranty or representation
 
 Requirement:
 
-`The supplier must maintain ISO 27001 certification.`
-
-Supplied evidence:
-
-- EvidenceId: `EVIDENCE-SOURCE-001`
-- EvidenceText: `The organisation maintains ISO 27001 certification under certificate ABC-123, valid until 31 December 2027.`
+The Supplier warrants that all submitted information is true and accurate.
 
 Response:
 
-```json
+{
+  "EvidenceFound": false,
+  "EvidenceReason": "This is a tender warranty and does not require existing company evidence.",
+  "EvidenceSummary": "",
+  "EvidenceConfidence": 0.0,
+  "MissingEvidenceReason": "Not applicable: this requirement must be addressed through the tender declaration or legal response.",
+  "SupportingEvidenceIds": []
+}
+
+14.2 Contractual acknowledgment
+
+Requirement:
+
+The Supplier acknowledges that it has sufficient information to perform the contract.
+
+Response:
+
+{
+  "EvidenceFound": false,
+  "EvidenceReason": "This is a contractual acknowledgment rather than a request for existing company evidence.",
+  "EvidenceSummary": "",
+  "EvidenceConfidence": 0.0,
+  "MissingEvidenceReason": "Not applicable: this requirement must be addressed through the legal or contract response.",
+  "SupportingEvidenceIds": []
+}
+
+14.3 Liability clause with exception
+
+Requirement:
+
+The Supplier is liable for worker acts and omissions except while the worker is under the Customer's control.
+
+Response:
+
+{
+  "EvidenceFound": false,
+  "EvidenceReason": "This is a contractual liability allocation rather than a request for existing company evidence.",
+  "EvidenceSummary": "",
+  "EvidenceConfidence": 0.0,
+  "MissingEvidenceReason": "Not applicable: this requirement must be addressed through the legal or contract response.",
+  "SupportingEvidenceIds": []
+}
+
+The exception must not be reversed or omitted.
+
+14.4 Future confidentiality agreement
+
+Requirement:
+
+Supplier Staff must enter into a confidentiality agreement at the Customer's request.
+
+Response:
+
+{
+  "EvidenceFound": false,
+  "EvidenceReason": "This requirement is satisfied by entering into a future confidentiality agreement and does not require existing company evidence.",
+  "EvidenceSummary": "",
+  "EvidenceConfidence": 0.0,
+  "MissingEvidenceReason": "Not applicable: this requirement must be addressed through the legal or contract response.",
+  "SupportingEvidenceIds": []
+}
+
+14.5 Future compliance with buyer policies
+
+Requirement:
+
+The Supplier must ensure workers comply with the Customer's policies during delivery.
+
+Response:
+
+{
+  "EvidenceFound": false,
+  "EvidenceReason": "This is a future contractual performance obligation and does not require existing company evidence unless the requirement explicitly asks for proof of an existing compliance process.",
+  "EvidenceSummary": "",
+  "EvidenceConfidence": 0.0,
+  "MissingEvidenceReason": "Not applicable: this requirement must be addressed through the delivery commitment or contract response.",
+  "SupportingEvidenceIds": []
+}
+
+15. Evidence-Applicable Examples
+
+15.1 Direct evidence found
+
+Requirement:
+
+The Supplier must maintain ISO 27001 certification.
+
+Evidence:
+
+EvidenceId: EVIDENCE-SOURCE-001
+
+EvidenceText: The organisation maintains ISO 27001 certification under certificate ABC-123, valid until 31 December 2027.
+
+Response:
+
 {
   "EvidenceFound": true,
   "EvidenceReason": "The supplied certification record explicitly confirms that the organisation maintains ISO 27001 certification.",
@@ -225,124 +440,161 @@ Response:
     "EVIDENCE-SOURCE-001"
   ]
 }
-```
 
-### No direct evidence
+15.2 No direct evidence
 
-```json
+Requirement:
+
+The Supplier must demonstrate an established worker-vetting process.
+
+Response:
+
 {
   "EvidenceFound": false,
-  "EvidenceReason": "The supplied evidence does not directly demonstrate the required worker-vetting process.",
+  "EvidenceReason": "No supplied evidence directly demonstrates the required worker-vetting process.",
   "EvidenceSummary": "",
   "EvidenceConfidence": 0.0,
-  "MissingEvidenceReason": "A documented worker-vetting policy, procedure or verification record is missing.",
+  "MissingEvidenceReason": "No supplied evidence directly demonstrates the required worker-vetting process.",
   "SupportingEvidenceIds": []
 }
-```
 
-### No evidence chunks supplied
+15.3 No chunks supplied
 
-```json
 {
   "EvidenceFound": false,
   "EvidenceReason": "No company evidence chunks were supplied for evaluation.",
   "EvidenceSummary": "",
   "EvidenceConfidence": 0.0,
-  "MissingEvidenceReason": "Company evidence directly supporting the requirement is unavailable.",
+  "MissingEvidenceReason": "No company evidence was available to evaluate the requirement.",
   "SupportingEvidenceIds": []
 }
-```
 
-### Submission instruction: evidence not applicable
+16. Generic, Inferred and Contradictory Evidence
 
-Requirement:
+Generic marketing language alone must not produce a positive result.
 
-`Complete the Total Cost of Delivery Worksheet.`
+When evidence requires inference, return a negative result.
 
-Response:
+When evidence materially contradicts itself:
 
-```json
-{
-  "EvidenceFound": false,
-  "EvidenceReason": "This is a tender submission instruction and does not require supporting company evidence.",
-  "EvidenceSummary": "",
-  "EvidenceConfidence": 0.0,
-  "MissingEvidenceReason": "Not applicable: this requirement must be satisfied by completing the Total Cost of Delivery Worksheet.",
-  "SupportingEvidenceIds": []
-}
-```
+return a negative result unless authoritative supplied evidence resolves the contradiction;
 
-### Contract acceptance: evidence not applicable
+return an empty summary;
 
-Requirement:
+set confidence to 0.0;
 
-`The Supplier must accept the confidentiality clause.`
+return no supporting IDs;
 
-Response:
+describe the contradiction concisely.
 
-```json
-{
-  "EvidenceFound": false,
-  "EvidenceReason": "This is a contract-acceptance requirement rather than a request for existing company evidence.",
-  "EvidenceSummary": "",
-  "EvidenceConfidence": 0.0,
-  "MissingEvidenceReason": "Not applicable: this requirement must be addressed through the legal or contract response.",
-  "SupportingEvidenceIds": []
-}
-```
-
-## 13. Application Responsibilities
+17. Application Responsibilities
 
 The application, not the LLM, adds:
 
-- `EvidenceSummaryItemId`;
-- `CanonicalRequirementId`;
-- `RequirementIds`;
-- `CanonicalRequirement`;
-- `RequirementType`;
-- `IntentResult`;
-- `EvidenceSources`;
-- operational `Status`.
+EvidenceSummaryItemId;
+
+CanonicalRequirementId;
+
+RequirementIds;
+
+CanonicalRequirement;
+
+RequirementType;
+
+IntentResult;
+
+EvidenceSources;
+
+operational Status.
 
 The application must:
 
-1. validate every returned SupportingEvidenceId against supplied Qdrant
-   results;
-2. reject unknown IDs;
-3. remove duplicate IDs and duplicate evidence text;
-4. build EvidenceSources only from validated supporting IDs;
-5. save an empty EvidenceSources array when EvidenceFound is false;
-6. never save all retrieved candidates automatically;
-7. preserve one output item for every canonical requirement.
+validate every returned SupportingEvidenceId against supplied Qdrant results;
 
-## 14. Final Validation Rules
+reject unknown or modified IDs;
 
-A valid LLM response requires:
+remove duplicate IDs and materially duplicate evidence;
 
-1. exactly the six allowed fields;
-2. `EvidenceFound` is boolean;
-3. `EvidenceReason` is non-empty;
-4. `EvidenceConfidence` is between `0.0` and `1.0`;
-5. positive result:
-   - non-empty EvidenceSummary;
-   - null MissingEvidenceReason;
-   - at least one valid SupportingEvidenceId;
-6. negative result:
-   - empty EvidenceSummary;
-   - confidence `0.0`;
-   - non-empty MissingEvidenceReason;
-   - empty SupportingEvidenceIds;
-7. no invented or unknown EvidenceId;
-8. no generic marketing-only positive result;
-9. no partial-evidence positive result;
-10. directly parseable JSON.
+build EvidenceSources only from validated supporting IDs;
 
-## 15. JSON Rules
+save an empty EvidenceSources array when EvidenceFound is false;
 
-1. Return one JSON object only.
-2. Use double quotes for property names and string values.
-3. Do not include trailing commas.
-4. Do not include Markdown fences.
-5. Do not include comments or reasoning.
-6. Do not add extra properties.
-7. Do not return null for required strings or arrays.
+never save all retrieved candidates automatically;
+
+preserve one output item for every canonical requirement;
+
+reject a positive result when any material summary claim lacks traceable evidence;
+
+preserve the LLM applicability decision and not replace a non-applicable result with a generic missing-evidence result;
+
+preserve all requirement conditions, exceptions and negations when building the final response.
+
+18. Final Validation Rules
+
+A valid response requires:
+
+exactly the six allowed fields;
+
+EvidenceFound is boolean;
+
+EvidenceReason is a non-empty string;
+
+EvidenceSummary is a string;
+
+EvidenceConfidence is a number from 0.0 to 1.0;
+
+MissingEvidenceReason is a string or null;
+
+SupportingEvidenceIds is an array of strings;
+
+positive result:
+
+non-empty summary;
+
+confidence from 0.60 to 1.0;
+
+null missing-evidence reason;
+
+at least one valid supporting ID;
+
+negative result:
+
+empty summary;
+
+confidence 0.0;
+
+non-empty missing-evidence reason;
+
+empty supporting IDs;
+
+no invented or unknown evidence ID;
+
+no generic-marketing-only positive result;
+
+no partial-evidence positive result;
+
+every positive summary claim is traceable;
+
+non-applicable requirements are not described as missing company evidence;
+
+no condition, exception, exclusion or negation is reversed;
+
+directly parseable JSON.
+
+19. JSON Rules
+
+Return one JSON object only.
+
+Use double quotes for property names and string values.
+
+Do not include trailing commas.
+
+Do not include Markdown fences.
+
+Do not include comments or reasoning.
+
+Do not add extra properties.
+
+Do not return null for required strings or arrays.
+
+Do not place text before or after the JSON object.
