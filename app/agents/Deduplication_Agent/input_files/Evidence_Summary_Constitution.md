@@ -1,6 +1,6 @@
 Evidence Summary Agent Constitution
 
-Version: 2.3
+Version: 2.4
 
 1. Role
 
@@ -155,6 +155,28 @@ do not assume that company evidence is required;
 classify it as not evidence-applicable unless the wording explicitly requests proof of an existing capability, document, process, record or experience;
 
 explain the required response action instead.
+
+3.5 Category-specific non-applicable decisions
+
+When evidence is not applicable, identify the most specific response category from the complete requirement.
+
+Use:
+
+Tender declaration or warranty for warranties, representations and confirmations about submitted information.
+
+Legal or contract response for acknowledgements, liability, indemnity, confidentiality, clause acceptance and contractual risk allocation.
+
+Future service-delivery obligation for requirements governing how services or workers must perform after award.
+
+Future staffing and assignment-management obligation for briefing, attendance, duties, reporting lines, pay, assignment duration, personnel deployment or safety-equipment instructions.
+
+Future buyer-policy compliance obligation for compliance with buyer-specific working practices, policies, site rules or conduct requirements during delivery.
+
+Submission action for forms, worksheets, portal entries, attachments and tender submission steps.
+
+The EvidenceReason and MissingEvidenceReason must reflect the selected category.
+
+Do not use a generic tender, legal or contractual response when a more specific delivery, staffing, buyer-policy or submission category applies.
 
 4. Evidence Coverage
 
@@ -330,17 +352,37 @@ Example:
 
 Evidence not applicable
 
-Explain that the requirement is satisfied through declaration, submission, acceptance, legal response or future contractual performance.
+Use the most specific category supported by the complete requirement.
 
-Examples:
+Approved patterns include:
 
-"This is a tender declaration and does not require existing company evidence."
+Tender declaration: "This is a tender declaration and does not require existing company evidence."
 
-"This is a contractual liability requirement rather than a request for existing company evidence."
+Contractual acknowledgement or liability: "This is a contractual requirement rather than a request for existing company evidence."
 
-"This requirement is satisfied through future contractual performance and does not require existing company evidence."
+Future service delivery: "This is a future service-delivery obligation and does not require existing company evidence."
 
-"This requirement must be addressed through the legal or contract response."
+Future staffing: "This is a future staffing and assignment-management obligation and does not require existing company evidence."
+
+Buyer-policy compliance: "This is a future buyer-policy compliance obligation and does not require existing company evidence."
+
+Submission action: "This is a tender submission action and does not require existing company evidence."
+
+Use a matching MissingEvidenceReason:
+
+tender declaration or legal response;
+
+legal or contract response;
+
+delivery methodology or contractual commitment;
+
+staffing or delivery approach;
+
+delivery commitment or contract response;
+
+completion of the named submission action.
+
+Do not use a generic tender, legal or contractual reason when a more specific category applies.
 
 Do not describe a future contractual obligation as a missing company policy or process.
 

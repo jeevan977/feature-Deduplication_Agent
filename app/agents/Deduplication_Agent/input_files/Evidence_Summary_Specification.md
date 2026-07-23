@@ -1,6 +1,6 @@
 Evidence Summary Agent Specification
 
-Version: 2.3
+Version: 2.4
 
 1. Purpose
 
@@ -48,6 +48,10 @@ Apply these steps in order:
 Determine whether the requirement asks for proof of an existing company capability, record, policy, process, certification, control, methodology or experience.
 
 If not, classify the requirement as evidence not applicable.
+
+For a non-applicable requirement, classify it into the most specific response category: declaration, legal/contract, service delivery, staffing/assignment management, buyer-policy compliance or submission action.
+
+Generate category-matched EvidenceReason and MissingEvidenceReason.
 
 If evidence is applicable, evaluate all supplied chunks.
 
@@ -99,18 +103,57 @@ a future commitment to comply, perform, notify, sign, submit or provide;
 
 compliance with buyer-specific policies during future delivery.
 
-When not applicable, return:
+When not applicable, select the most specific category from the complete requirement and use category-matched wording.
 
-{
-  "EvidenceFound": false,
-  "EvidenceReason": "This requirement is satisfied through the tender, legal or contractual response and does not require existing company evidence.",
-  "EvidenceSummary": "",
-  "EvidenceConfidence": 0.0,
-  "MissingEvidenceReason": "Not applicable: this requirement must be addressed through the tender, legal or contract response.",
-  "SupportingEvidenceIds": []
-}
+Do not use one generic tender/legal reason for every non-applicable requirement.
+
+Category rules:
+
+Category
+
+EvidenceReason
+
+MissingEvidenceReason
+
+Tender declaration or warranty
+
+This is a tender declaration and does not require existing company evidence.
+
+Not applicable: this requirement must be addressed through the tender declaration or legal response.
+
+Contractual acknowledgement, liability, confidentiality or clause acceptance
+
+This is a contractual requirement rather than a request for existing company evidence.
+
+Not applicable: this requirement must be addressed through the legal or contract response.
+
+Future service-delivery obligation
+
+This is a future service-delivery obligation and does not require existing company evidence.
+
+Not applicable: this requirement must be addressed through the delivery methodology or contractual commitment.
+
+Future staffing and assignment-management obligation
+
+This is a future staffing and assignment-management obligation and does not require existing company evidence.
+
+Not applicable: this requirement must be addressed through the staffing or delivery approach.
+
+Future buyer-policy compliance obligation
+
+This is a future buyer-policy compliance obligation and does not require existing company evidence.
+
+Not applicable: this requirement must be addressed through the delivery commitment or contract response.
+
+Submission action
+
+This is a tender submission action and does not require existing company evidence.
+
+Not applicable: this requirement must be satisfied by completing the required submission action.
 
 Do not say that a policy, process, control, agreement or record is missing for a non-applicable requirement.
+
+Do not use the generic legal/contract category when the requirement clearly concerns future service delivery, staffing, assignment management, buyer-policy compliance or a submission action.
 
 5.3 Existing-state override
 
@@ -407,10 +450,44 @@ Response:
 
 {
   "EvidenceFound": false,
-  "EvidenceReason": "This is a future contractual performance obligation and does not require existing company evidence unless the requirement explicitly asks for proof of an existing compliance process.",
+  "EvidenceReason": "This is a future buyer-policy compliance obligation and does not require existing company evidence.",
   "EvidenceSummary": "",
   "EvidenceConfidence": 0.0,
   "MissingEvidenceReason": "Not applicable: this requirement must be addressed through the delivery commitment or contract response.",
+  "SupportingEvidenceIds": []
+}
+
+14.6 Future service-delivery obligation
+
+Requirement:
+
+The Supplier must ensure assigned workers perform their duties with due skill, care and professional conduct.
+
+Response:
+
+{
+  "EvidenceFound": false,
+  "EvidenceReason": "This is a future service-delivery obligation and does not require existing company evidence.",
+  "EvidenceSummary": "",
+  "EvidenceConfidence": 0.0,
+  "MissingEvidenceReason": "Not applicable: this requirement must be addressed through the delivery methodology or contractual commitment.",
+  "SupportingEvidenceIds": []
+}
+
+14.7 Future staffing and assignment-management obligation
+
+Requirement:
+
+The Supplier must ensure staff are briefed on assignment location, attendance times, duties, reporting lines and required safety equipment.
+
+Response:
+
+{
+  "EvidenceFound": false,
+  "EvidenceReason": "This is a future staffing and assignment-management obligation and does not require existing company evidence.",
+  "EvidenceSummary": "",
+  "EvidenceConfidence": 0.0,
+  "MissingEvidenceReason": "Not applicable: this requirement must be addressed through the staffing or delivery approach.",
   "SupportingEvidenceIds": []
 }
 
@@ -527,6 +604,8 @@ reject a positive result when any material summary claim lacks traceable evidenc
 
 preserve the LLM applicability decision and not replace a non-applicable result with a generic missing-evidence result;
 
+preserve the category-specific reason and not replace service-delivery, staffing, buyer-policy or submission wording with a generic tender/legal response;
+
 preserve all requirement conditions, exceptions and negations when building the final response.
 
 18. Final Validation Rules
@@ -576,6 +655,10 @@ no partial-evidence positive result;
 every positive summary claim is traceable;
 
 non-applicable requirements are not described as missing company evidence;
+
+every non-applicable result uses the most specific category-supported reason;
+
+service-delivery and staffing obligations are not given a generic tender/legal reason;
 
 no condition, exception, exclusion or negation is reversed;
 
