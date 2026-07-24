@@ -1,315 +1,364 @@
-Requirement Deduplication Specification
+Duplicate Removal Specification
 
-Version: 2.9
+Version: 1.3
 
 1. Purpose
 
-This file defines the runtime process and strict JSON response for the Requirement Deduplication Agent. Follow the Constitution for all duplicate and canonicalisation decisions.
+This Specification defines the runtime process, semantic comparison logic, runtime loading checks and post-processing validation required for duplicate removal.
 
-Validate only:
+The agent and host application must follow the Duplicate Removal Constitution.
 
-Duplicate Removal;
+The process must focus only on:
 
-Semantic Accuracy;
+duplicate candidate matching;
 
-Hallucination Check;
+actor resolution;
 
-Output Schema Validation.
+semantic comparison;
 
-Return one JSON object only. Do not return Markdown, code fences, reasoning, comments or text outside the JSON.
+duplicate grouping;
 
-2. Input
+final duplicate audit;
 
-Each requirement contains:
+prompt-loading verification;
+
+post-processing preservation;
+
+duplicate summary validation.
+
+Return one strict JSON object only.
+
+2. Input Structure
+
+Each input requirement should contain:
 
 {
   "RequirementId": "REQ-001",
-  "RequirementText": "The Supplier must maintain accurate records for seven years.",
-  "RequirementType": "Compliance",
+  "RequirementText": "will, if required, enter into a confidentiality agreement with Cadent.",
+  "RequirementType": "Legal",
+  "ParentText": "The Supplier must ensure that all Supplier Staff:",
   "LinkedContext": null
 }
 
-Rules:
+Input Rules
 
-RequirementText is the primary evidence.
+RequirementId must be preserved exactly.
 
-LinkedContext may be used only when explicitly supplied and applicable.
+RequirementText is the primary semantic source.
 
-RequirementType supports classification but does not decide duplication.
+ParentText and LinkedContext may be used only when explicitly supplied.
 
-Use only supplied RequirementIds; do not create or modify them.
+RequirementType must not decide duplication.
 
-Do not use IntentResult, capability intents, evidence sections or semantic anchors as duplicate evidence.
+IntentResult, capability intent, evidence sections and semantic anchors must not be used to prove duplication or resolve the actor.
 
-3. Runtime Process
+3. Mandatory Pre-Deduplication Semantic Tagging Stage
 
-Validate the input fields and collect the ordered source requirements.
+Before duplicate candidate generation, the host application or a dedicated semantic-tagging step must enrich every requirement with structured semantic tags.
 
-Build a semantic obligation signature for each requirement.
+The deduplication LLM must receive the requirement and its tags together in the same object.
 
-Compare every requirement with every other requirement.
+Required sequence:
 
-Merge exact duplicates, semantic duplicates, fragment-to-complete equivalents and compatible restatements.
+1. Extract requirement
+2. Attach parent or linked context
+3. Generate semantic tags
+4. Validate semantic tags
+5. Send requirement plus tags to deduplication
+6. Generate duplicate candidates
+7. Compare complete semantic fields
+8. Merge duplicate groups
 
-Create one complete canonical requirement for every resulting group, including single-source groups.
-
-Compare every proposed canonical record against every other proposed record.
-
-Merge remaining equivalent records and repeat until stable.
-
-Validate canonical wording, RequirementId usage and the final JSON schema.
-
-Assign sequential canonical IDs.
-
-Calculate summary values from the final records.
-
-Return the exact successful-response structure in Section 8.
-
-4. Dynamic Semantic Merge Rules
-
-Merge requirements when they express the same core obligation and no material conflict exists.
-
-Core comparison fields:
-
-responsible party;
-
-obligation strength and negation;
-
-action and object;
-
-counterparty or beneficiary;
-
-trigger and timing;
-
-scope, conditions and exceptions;
-
-legal or contractual effect.
-
-Equivalent differences that normally permit merging include:
-
-wording, grammar, order or voice;
-
-singular/plural or equivalent terminology;
-
-complete sentence versus equivalent fragment;
-
-if required, when requested, upon request and at the buyer's request;
-
-one version containing compatible additional detail.
-
-Do not require identical wording. Do not keep equivalent requirements separate merely because one is more detailed.
-
-Keep requirements separate only when a material difference creates a different duty, such as a different responsible party, action, object, scope, trigger, timeline, condition, exception, prohibition, strength or legal effect.
-
-5. Canonical Wording Generation
-
-Canonical wording must be generated dynamically from the current duplicate group.
-
-For each group:
-
-identify the common complete obligation;
-
-select the clearest complete source wording as the base where possible;
-
-restore missing grammar from another validated group member or explicit LinkedContext;
-
-preserve the union of compatible supported qualifiers;
-
-produce one complete standalone sentence;
-
-preserve legal strength, negation, conditions, exceptions and effect.
-
-Do not use a fixed canonical sentence for unrelated requirements. Examples in this Specification demonstrate structure only.
-
-A material phrase may be included when supported by at least one grouped source and not contradicted by another grouped source.
-
-6. Fragment Handling
-
-Invalid final fragments include wording such as:
-
-will, if required, enter into an agreement...;
-
-are properly briefed about their assignment...;
-
-provides the requested evidence....
-
-A missing subject may be restored from another source in the same duplicate group when the action, object, counterparty and trigger establish the same obligation and no conflicting subject exists.
-
-For a single-source fragment, use explicit LinkedContext or supplied parent context. If no safe context is available, return INVALID_CANONICAL_REQUIREMENT.
-
-Never return a successful record with an incomplete fragment.
-
-7. Final Duplicate Audit
-
-Immediately before returning the result:
-
-compare every final record against every other final record;
-
-merge records with the same core obligation;
-
-combine their source IDs without duplication;
-
-rebuild the canonical wording from all grouped sources;
-
-remove the old separate records;
-
-repeat until no equivalent pair remains;
-
-assign CR-0001, CR-0002, and so on in final order;
-
-recalculate the complete summary.
-
-Application post-processing must preserve the final groups. It must not split a group based on lexical thresholds, different RequirementType values, original-text preference or downstream enrichment.
-
-8. Successful Response Schema
-
-Return exactly this structure:
+3.1 Required Enriched Input Structure
 
 {
-  "Summary": {
-    "TotalInputRequirements": 3,
-    "TotalDeduplicatedRequirements": 2,
-    "DuplicatesRemoved": 1
-  },
-  "JsonOutput": {
-    "DeduplicatedRequirements": [
-      {
-        "CanonicalRequirementId": "CR-0001",
-        "CanonicalRequirement": "The Supplier must submit the completed questionnaire using the required submission control.",
-        "RequirementIds": [
-          "REQ-001",
-          "REQ-002"
-        ],
-        "RequirementType": "Submission"
-      },
-      {
-        "CanonicalRequirementId": "CR-0002",
-        "CanonicalRequirement": "The Supplier must retain contract records for seven years.",
-        "RequirementIds": [
-          "REQ-003"
-        ],
-        "RequirementType": "Compliance"
-      }
+  "RequirementId": "REQ-003",
+  "RequirementText": "will, if required, enter into a confidentiality agreement with Cadent on terms and in a form acceptable to Cadent.",
+  "RequirementType": "Legal",
+  "ParentText": "The Supplier must ensure that all Supplier Staff:",
+  "LinkedContext": null,
+  "SemanticTags": {
+    "ResponsibleParty": [
+      "Supplier Staff"
+    ],
+    "Action": [
+      "enter into"
+    ],
+    "Object": [
+      "confidentiality agreement"
+    ],
+    "Counterparty": [
+      "Cadent"
+    ],
+    "Trigger": [
+      "if required"
+    ],
+    "Timing": [],
+    "Scope": [],
+    "Conditions": [],
+    "Exceptions": [],
+    "Qualifiers": [
+      "terms acceptable to Cadent",
+      "form acceptable to Cadent"
     ]
   }
 }
 
-The only successful top-level fields are:
+3.2 Required Semantic Tag Schema
 
-Summary;
+{
+  "ResponsibleParty": [],
+  "Action": [],
+  "Object": [],
+  "Counterparty": [],
+  "Trigger": [],
+  "Timing": [],
+  "Scope": [],
+  "Conditions": [],
+  "Exceptions": [],
+  "Qualifiers": []
+}
 
-JsonOutput.
+Rules:
 
-The only fields inside Summary are:
+every field is mandatory;
 
-TotalInputRequirements;
+every field must be an array;
 
-TotalDeduplicatedRequirements;
+use an empty array when a value is unresolved;
 
-DuplicatesRemoved.
+do not use null for semantic-tag arrays;
 
-The only field inside JsonOutput is:
+preserve tags with their original requirement.
 
-DeduplicatedRequirements.
+3.3 Tag Generation Logic
 
-The only fields inside each requirement record are:
+Generate tags from:
 
-CanonicalRequirementId;
+RequirementText
+→ ParentText
+→ LinkedContext
 
-CanonicalRequirement;
+Priority for responsible-party resolution:
 
-RequirementIds;
+responsible_party = (
+    extract_actor(RequirementText)
+    or extract_actor(ParentText)
+    or extract_actor(LinkedContext)
+)
 
-RequirementType.
+Do not resolve the actor from:
 
-Do not include IntentResult, duplicate reasons, confidence, validation notes or any additional fields.
+RequirementType
+IntentResult
+CapabilityIntent
+EvidenceSections
+generic SemanticAnchors
+nearby unrelated requirements
 
-9. Record Rules
+3.4 Example: Fragment with Parent Context
 
-Each record must satisfy all of the following:
+Input before tagging:
 
-CanonicalRequirementId is sequential and unique;
+{
+  "RequirementId": "REQ-003",
+  "RequirementText": "will, if required, enter into a confidentiality agreement with Cadent.",
+  "ParentText": "The Supplier must ensure that all Supplier Staff:"
+}
 
-CanonicalRequirement is a non-empty complete standalone sentence;
+Output from the semantic-tagging stage:
 
-RequirementIds is a non-empty array of distinct supplied IDs;
+{
+  "RequirementId": "REQ-003",
+  "RequirementText": "will, if required, enter into a confidentiality agreement with Cadent.",
+  "ParentText": "The Supplier must ensure that all Supplier Staff:",
+  "SemanticTags": {
+    "ResponsibleParty": [
+      "Supplier Staff"
+    ],
+    "Action": [
+      "enter into"
+    ],
+    "Object": [
+      "confidentiality agreement"
+    ],
+    "Counterparty": [
+      "Cadent"
+    ],
+    "Trigger": [
+      "if required"
+    ],
+    "Timing": [],
+    "Scope": [],
+    "Conditions": [],
+    "Exceptions": [],
+    "Qualifiers": []
+  }
+}
 
-every supplied ID appears in exactly one final record;
+3.5 Example: Complete Requirement
 
-a multi-ID record represents one complete material obligation;
+{
+  "RequirementId": "REQ-009",
+  "RequirementText": "The Supplier Staff must enter into a direct confidentiality agreement with Cadent at its request.",
+  "SemanticTags": {
+    "ResponsibleParty": [
+      "Supplier Staff"
+    ],
+    "Action": [
+      "enter into"
+    ],
+    "Object": [
+      "confidentiality agreement"
+    ],
+    "Counterparty": [
+      "Cadent"
+    ],
+    "Trigger": [
+      "at its request"
+    ],
+    "Timing": [],
+    "Scope": [],
+    "Conditions": [],
+    "Exceptions": [],
+    "Qualifiers": [
+      "direct"
+    ]
+  }
+}
 
-source order is preserved where possible;
+3.6 Required Duplicate Comparison Using Tags
 
-RequirementType is supported by the final canonical meaning;
+The deduplication stage must compare:
 
-no unknown field is present.
+ResponsibleParty
+Action
+Object
+Counterparty
+Trigger
+Timing
+Scope
+Conditions
+Exceptions
+Qualifiers
 
-When grouped sources have different RequirementType values, select the type that best represents the canonical obligation. Do not use the type difference as a reason to split genuine duplicates.
+For the two examples above:
 
-10. Summary Rules
+Semantic field
 
-Calculate from the actual final output:
+REQ-003
 
-TotalInputRequirements = number of distinct supplied RequirementIds;
+REQ-009
 
-TotalDeduplicatedRequirements = number of final records;
+Result
 
-DuplicatesRemoved = TotalInputRequirements - TotalDeduplicatedRequirements.
+ResponsibleParty
 
-The following must always hold:
+Supplier Staff
 
-TotalInputRequirements - DuplicatesRemoved = TotalDeduplicatedRequirements
+Supplier Staff
 
-Do not use target counts or estimates.
+Same
 
-11. Final Validation
+Action
 
-Before returning success, confirm:
+enter into
 
-Duplicate Removal
+enter into
 
-all exact and semantic duplicates are merged;
+Same
 
-no equivalent fragment and complete requirement remain separate;
+Object
 
-the final pairwise audit is stable.
+confidentiality agreement
 
-Semantic Accuracy
+confidentiality agreement
 
-every record preserves party, action, object, trigger, strength, scope, conditions, exceptions and legal effect;
+Same
 
-compatible qualifiers are preserved without creating another duty;
+Counterparty
 
-no incomplete fragment remains.
+Cadent
 
-Hallucination Check
+Cadent
 
-every material phrase is supported by a grouped source or explicit linked context;
+Same
 
-no unsupported party, action, trigger, value, standard or condition is added;
+Trigger
 
-no new requirement is created.
+if required
 
-Output Schema Validation
+at its request
 
-the response follows Section 8 exactly;
+Equivalent
 
-all IDs are valid and used once;
+Qualifiers
 
-IDs and summary values are correct;
+acceptable terms/form
 
-no extra fields or external text are present.
+direct
 
-12. Validation Error Schema
+Compatible
 
-When success cannot be produced, return exactly:
+Required decision:
+
+SemanticDuplicate
+
+3.7 Required Merged Output
+
+{
+  "CanonicalRequirementId": "CR-0007",
+  "CanonicalRequirement": "The Supplier Staff must, at Cadent's request, enter into a direct confidentiality agreement with Cadent on terms and in a form acceptable to Cadent.",
+  "RequirementIds": [
+    "REQ-003",
+    "REQ-009"
+  ],
+  "RequirementType": "Legal"
+}
+
+3.8 Generic Semantic Anchors Must Not Replace Structured Tags
+
+This is not sufficient:
+
+"SemanticAnchors": [
+  "confidentiality agreement",
+  "Cadent",
+  "terms",
+  "form",
+  "supplier staff"
+]
+
+Reason:
+
+supplier staff is not explicitly labelled as the responsible party;
+
+Cadent is not explicitly labelled as the counterparty;
+
+terms and form are not identified as qualifiers;
+
+duplicate comparison cannot reliably understand the role of each value.
+
+Structured SemanticTags are mandatory before deduplication.
+
+3.9 Pre-Deduplication Validation
+
+Before candidate matching, validate every requirement:
+
+SemanticTags exists
+All required fields exist
+All fields are arrays
+Tags belong to the same requirement
+ResponsibleParty was resolved from valid source context
+No unsupported tags were added
+
+When validation fails, return:
 
 {
   "ValidationError": {
-    "Code": "INVALID_CANONICAL_REQUIREMENT",
-    "Message": "A complete supported canonical requirement could not be produced.",
+    "Code": "SEMANTIC_TAGGING_FAILED",
+    "Message": "Structured semantic tags could not be generated or validated before duplicate comparison.",
     "AffectedRequirementIds": [
-      "REQ-001"
+      "REQ-003"
     ],
     "MissingRequirementIds": [],
     "RepeatedRequirementIds": [],
@@ -317,16 +366,676 @@ When success cannot be produced, return exactly:
   }
 }
 
-Permitted codes:
+The deduplication stage must not continue with incomplete or invalid structured tags.
 
-REQUIREMENT_ID_COVERAGE_FAILED;
+4. Required Runtime Process
+
+Step 1: Verify Prompt Files
+
+Before processing requirements, the host application must verify that the current Constitution and Specification are loaded.
+
+Required checks:
+
+Constitution file exists
+Specification file exists
+Constitution version = 1.1
+Specification version = 1.1
+Constitution content is non-empty
+Specification content is non-empty
+Both contents are present in the final LLM prompt
+
+The host application should log:
+
+Constitution path
+Specification path
+Constitution version
+Specification version
+Constitution hash
+Specification hash
+Final prompt length
+
+If any check fails, return:
+
+{
+  "ValidationError": {
+    "Code": "PROMPT_LOADING_FAILED",
+    "Message": "The current duplicate-removal Constitution or Specification was not loaded into the final LLM prompt.",
+    "AffectedRequirementIds": [],
+    "MissingRequirementIds": [],
+    "RepeatedRequirementIds": [],
+    "UnknownRequirementIds": []
+  }
+}
+
+Step 2: Validate Input IDs
+
+Create the ordered list of distinct supplied IDs.
+
+Reject:
+
+empty IDs;
+
+duplicate input IDs;
+
+malformed requirements.
+
+Step 3: Resolve Actors
+
+Resolve the responsible party from:
+
+RequirementText;
+
+ParentText;
+
+LinkedContext;
+
+inseparable list context.
+
+Example input:
+
+{
+  "RequirementId": "REQ-003",
+  "RequirementText": "will, if required, enter into a confidentiality agreement with Cadent.",
+  "ParentText": "The Supplier must ensure that all Supplier Staff:"
+}
+
+Resolved internal requirement:
+
+Actor: Supplier Staff
+Action: enter into
+Object: confidentiality agreement
+Counterparty: Cadent
+Trigger: if required
+
+When the actor cannot be resolved, classify related duplicate candidates as UnresolvedDuplicate.
+
+Step 4: Normalise Candidate Phrases
+
+Normalise phrases before candidate generation.
+
+Minimum trigger normalisation:
+
+{
+  "if required": "on_request",
+  "when requested": "on_request",
+  "upon request": "on_request",
+  "at its request": "on_request",
+  "at cadent's request": "on_request"
+}
+
+Minimum action normalisation:
+
+{
+  "enter into": "execute_agreement",
+  "execute": "execute_agreement",
+  "sign": "execute_agreement"
+}
+
+Minimum modality normalisation:
+
+{
+  "must": "mandatory",
+  "shall": "mandatory",
+  "will": "mandatory_when_contractual"
+}
+
+Normalisation is used only for comparison. It must not overwrite source text.
+
+Step 5: Generate Duplicate Candidates
+
+Generate a duplicate candidate when requirements share compatible values for:
+
+actor;
+
+normalised action;
+
+action object;
+
+counterparty;
+
+normalised trigger.
+
+Do not require high lexical similarity when these semantic fields match.
+
+Example candidate pair:
+
+CR candidate A:
+will, if required, enter into a confidentiality agreement with Cadent.
+
+CR candidate B:
+The Supplier Staff must enter into a direct confidentiality agreement with Cadent at its request.
+
+When parent context resolves candidate A to Supplier Staff, the pair must proceed to semantic comparison.
+
+Step 6: Build Full Obligation Signature
+
+For every requirement, derive internally:
+
+ResponsibleParty;
+
+Modality;
+
+Negation;
+
+Action;
+
+ActionObject;
+
+CounterpartyOrBeneficiary;
+
+Trigger;
+
+Timing;
+
+Scope;
+
+Conditions;
+
+Exceptions;
+
+LegalEffect.
+
+Do not return these fields.
+
+Step 7: Perform Semantic Comparison
+
+Compare each candidate using the full obligation signature.
+
+Classification options:
+
+ExactDuplicate;
+
+SemanticDuplicate;
+
+NotDuplicate;
+
+UnresolvedDuplicate.
+
+Classify as SemanticDuplicate when:
+
+actors match;
+
+actions are equivalent;
+
+objects match;
+
+counterparties match;
+
+triggers are equivalent;
+
+no timing, scope, condition, exception or legal-effect conflict exists;
+
+one canonical requirement can preserve both meanings.
+
+Example:
+
+Field
+
+Requirement A
+
+Requirement B
+
+Result
+
+Actor
+
+Supplier Staff
+
+Supplier Staff
+
+Same
+
+Action
+
+Enter into
+
+Execute
+
+Equivalent
+
+Object
+
+Confidentiality agreement
+
+Direct confidentiality agreement
+
+Compatible
+
+Counterparty
+
+Cadent
+
+Cadent
+
+Same
+
+Trigger
+
+If required
+
+At its request
+
+Equivalent
+
+Final decision
+
+
+
+
+
+SemanticDuplicate
+
+Step 8: Build Duplicate Groups
+
+For every exact or semantic duplicate group:
+
+include all matching source IDs;
+
+include each ID once;
+
+create one canonical requirement;
+
+preserve compatible details.
+
+Correct group example:
+
+{
+  "CanonicalRequirementId": "CR-0007",
+  "CanonicalRequirement": "The Supplier Staff must, at Cadent's request, enter into a direct confidentiality agreement with Cadent on terms and in a form acceptable to Cadent.",
+  "RequirementIds": [
+    "REQ-003",
+    "REQ-009"
+  ],
+  "RequirementType": "Legal"
+}
+
+Step 9: Final Pairwise Duplicate Audit
+
+After generating final records, compare every final canonical requirement against every other final canonical requirement.
+
+Pseudo-process:
+
+repeat
+    duplicate_found = false
+
+    for each final record A
+        for each final record B after A
+            compare full obligation signatures
+
+            if A and B are duplicates
+                merge A and B
+                regenerate canonical wording
+                duplicate_found = true
+
+until duplicate_found = false
+
+The response must not be returned before this loop is stable.
+
+Step 10: Capture Raw LLM Output
+
+The host application must log the raw LLM response before:
+
+JSON parsing;
+
+enrichment;
+
+canonical text replacement;
+
+MongoDB mapping.
+
+Required log label:
+
+DEDUPLICATION_RAW_LLM_OUTPUT
+
+Step 11: Protect Groups During Post-Processing
+
+Post-processing must preserve:
+
+canonical grouping;
+
+all grouped requirement IDs;
+
+canonical record count;
+
+canonical wording unless only safe formatting is applied.
+
+The application must compare these stages:
+
+Raw LLM output
+Parsed output
+Enriched output
+MongoDB payload
+
+For every stage, calculate a group signature:
+
+sorted RequirementIds joined together
+
+Example:
+
+REQ-003|REQ-009
+
+The same signature must exist in every stage.
+
+If raw output contains:
+
+"RequirementIds": ["REQ-003", "REQ-009"]
+
+but MongoDB contains two separate records, return:
+
+{
+  "ValidationError": {
+    "Code": "POST_PROCESSING_GROUP_CHANGED",
+    "Message": "A valid duplicate group returned by the LLM was changed during parsing, enrichment or persistence.",
+    "AffectedRequirementIds": [
+      "REQ-003",
+      "REQ-009"
+    ],
+    "MissingRequirementIds": [],
+    "RepeatedRequirementIds": [],
+    "UnknownRequirementIds": []
+  }
+}
+
+Step 12: Validate ID Coverage
+
+Confirm:
+
+every input ID appears once;
+
+no ID is missing;
+
+no ID is repeated;
+
+no unknown ID is added.
+
+Step 13: Calculate Summary
+
+Calculate:
+
+TotalInputRequirements =
+number of distinct input RequirementIds
+
+TotalDeduplicatedRequirements =
+number of final canonical records
+
+DuplicatesRemoved =
+TotalInputRequirements - TotalDeduplicatedRequirements
+
+5. Mandatory Confidentiality Example
+
+Input A
+
+{
+  "RequirementId": "REQ-003",
+  "RequirementText": "will, if required, enter into a confidentiality agreement with Cadent on terms and in a form acceptable to Cadent.",
+  "ParentText": "The Supplier must ensure that all Supplier Staff:"
+}
+
+Input B
+
+{
+  "RequirementId": "REQ-009",
+  "RequirementText": "The Supplier Staff must enter into a direct confidentiality agreement with Cadent at its request.",
+  "ParentText": null
+}
+
+Resolved comparison
+
+Actor A = Supplier Staff
+Actor B = Supplier Staff
+
+Action A = execute_agreement
+Action B = execute_agreement
+
+Object A = confidentiality agreement
+Object B = direct confidentiality agreement
+
+Counterparty A = Cadent
+Counterparty B = Cadent
+
+Trigger A = on_request
+Trigger B = on_request
+
+Required decision
+
+SemanticDuplicate
+
+Required merged output
+
+{
+  "CanonicalRequirementId": "CR-0007",
+  "CanonicalRequirement": "The Supplier Staff must, at Cadent's request, enter into a direct confidentiality agreement with Cadent on terms and in a form acceptable to Cadent.",
+  "RequirementIds": [
+    "REQ-003",
+    "REQ-009"
+  ],
+  "RequirementType": "Legal"
+}
+
+6. Non-Duplicate Examples
+
+Do not merge:
+
+The Supplier Staff must sign a confidentiality agreement.
+
+with:
+
+The Supplier must maintain a confidentiality policy.
+
+Reason:
+
+Different actor
+Different action
+Different required output
+
+Do not merge:
+
+The Supplier must train staff on confidentiality.
+
+with:
+
+Supplier Staff must sign confidentiality agreements.
+
+Reason:
+
+Training obligation is different from agreement execution.
+
+7. Successful Output Schema
+
+Return exactly:
+
+{
+  "Summary": {
+    "TotalInputRequirements": 10,
+    "TotalDeduplicatedRequirements": 8,
+    "DuplicatesRemoved": 2
+  },
+  "JsonOutput": {
+    "DeduplicatedRequirements": [
+      {
+        "CanonicalRequirementId": "CR-0001",
+        "CanonicalRequirement": "The Supplier must perform the specified obligation.",
+        "RequirementIds": [
+          "REQ-001"
+        ],
+        "RequirementType": "Compliance"
+      }
+    ]
+  }
+}
+
+8. Validation Error Schema
+
+Return exactly:
+
+{
+  "ValidationError": {
+    "Code": "UNRESOLVED_DUPLICATE",
+    "Message": "A potential semantic duplicate could not be resolved from the supplied requirement text or linked context.",
+    "AffectedRequirementIds": [
+      "REQ-001",
+      "REQ-002"
+    ],
+    "MissingRequirementIds": [],
+    "RepeatedRequirementIds": [],
+    "UnknownRequirementIds": []
+  }
+}
+
+Permitted error codes:
+
+PROMPT_LOADING_FAILED;
+
+SEMANTIC_TAGGING_FAILED;
+
+INVALID_INPUT_IDS;
+
+UNRESOLVED_DUPLICATE;
 
 INVALID_DUPLICATE_GROUP;
 
-INVALID_CANONICAL_REQUIREMENT;
+DUPLICATE_REMAINS;
 
-DUPLICATE_REMOVAL_VALIDATION_FAILED;
+POST_PROCESSING_GROUP_CHANGED;
+
+REQUIREMENT_ID_COVERAGE_FAILED;
+
+DUPLICATE_SUMMARY_FAILED;
 
 OUTPUT_SCHEMA_VALIDATION_FAILED.
 
-All listed fields and arrays are mandatory. Do not return partial success.
+Do not return partial success.
+
+9. Final Duplicate Removal Checklist
+
+Before returning success, confirm:
+
+current Constitution and Specification were loaded;
+
+equivalent phrases were normalised;
+
+actors were resolved from valid context;
+
+candidate matching used semantic fields;
+
+full obligation signatures were compared;
+
+all supported semantic duplicates were merged;
+
+no duplicate remains after the final audit;
+
+raw LLM groups were preserved through post-processing;
+
+each input ID appears exactly once;
+
+summary values match the final output.
+
+If any check fails, return the appropriate validation error.
+
+Mandatory Runtime Test: Confidentiality Fragment Duplicate
+
+The runtime must explicitly handle the following test case.
+
+Input A
+
+{
+  "RequirementId": "REQ-A",
+  "RequirementText": "will, if required, enter into a confidentiality agreement with Cadent on terms and in a form acceptable to Cadent.",
+  "RequirementType": "Legal",
+  "ParentText": "The Supplier must ensure that all Supplier Staff:",
+  "LinkedContext": null,
+  "SemanticTags": {
+    "ResponsibleParty": ["Supplier Staff"],
+    "Action": ["enter into"],
+    "Object": ["confidentiality agreement"],
+    "Counterparty": ["Cadent"],
+    "Trigger": ["if required"],
+    "Timing": [],
+    "Scope": [],
+    "Conditions": [],
+    "Exceptions": [],
+    "Qualifiers": [
+      "terms acceptable to Cadent",
+      "form acceptable to Cadent"
+    ]
+  }
+}
+
+Input B
+
+{
+  "RequirementId": "REQ-B",
+  "RequirementText": "The Supplier Staff must enter into a direct confidentiality agreement with Cadent at its request.",
+  "RequirementType": "Compliance",
+  "ParentText": null,
+  "LinkedContext": null,
+  "SemanticTags": {
+    "ResponsibleParty": ["Supplier Staff"],
+    "Action": ["enter into"],
+    "Object": ["confidentiality agreement"],
+    "Counterparty": ["Cadent"],
+    "Trigger": ["at its request"],
+    "Timing": [],
+    "Scope": [],
+    "Conditions": [],
+    "Exceptions": [],
+    "Qualifiers": ["direct"]
+  }
+}
+
+Required normalization
+
+if required        → on_request
+at its request     → on_request
+enter into         → execute_agreement
+must               → mandatory
+contractual will   → mandatory
+
+Required comparison result
+
+ResponsibleParty: Supplier Staff = Supplier Staff
+Action: execute_agreement = execute_agreement
+Object: confidentiality agreement = confidentiality agreement
+Counterparty: Cadent = Cadent
+Trigger: on_request = on_request
+Qualifiers: compatible
+
+Required decision:
+
+SemanticDuplicate
+
+Required merged output
+
+{
+  "CanonicalRequirementId": "CR-0001",
+  "CanonicalRequirement": "The Supplier Staff must, at Cadent's request, enter into a direct confidentiality agreement with Cadent on terms and in a form acceptable to Cadent.",
+  "RequirementIds": [
+    "REQ-A",
+    "REQ-B"
+  ],
+  "RequirementType": "Legal"
+}
+
+Prohibited result
+
+It is invalid to return Requirement A and Requirement B as two separate canonical records after valid actor resolution.
+
+Unresolved actor behavior
+
+If Requirement A does not include valid ParentText, LinkedContext, or SemanticTags.ResponsibleParty, return:
+
+{
+  "ValidationError": {
+    "Code": "UNRESOLVED_DUPLICATE",
+    "Message": "The responsible party for a potential confidentiality-agreement duplicate could not be resolved safely.",
+    "AffectedRequirementIds": [
+      "REQ-A",
+      "REQ-B"
+    ],
+    "MissingRequirementIds": [],
+    "RepeatedRequirementIds": [],
+    "UnknownRequirementIds": []
+  }
+}
+
+The runtime must never silently keep the pair separate when the pre-deduplication stage should have supplied the missing actor.
